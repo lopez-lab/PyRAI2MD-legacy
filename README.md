@@ -25,6 +25,6 @@ Python Rapid Artificial Intelligence Ab Initio Molecular Dynamics
     Andre Eberhard	 - Gaussian process regression
     Patrick Reiser	 - Neural networks
 
-  Special acknowledgement to:
+  Special acknowledgment to:
     Steven A. Lopez	 - Project directorship
     Pascal Friederich    - ML directorship
