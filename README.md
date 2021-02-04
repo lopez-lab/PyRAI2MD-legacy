@@ -18,11 +18,17 @@ Python Rapid Artificial Intelligence Ab Initio Molecular Dynamics
                    Developer@Jingbai Li
                Northeastern University, USA
 
-                      version:   0.5
+                      version:   0.8
                       
     With contributions from(in alphabetic order):
-      Andre Eberhard	 - Gaussian process regression
-      Patrick Reiser	 - Neural networks
+    Andre Eberhard	           - Gaussian process regression
+    Jingbai Li/Daniel Susman   - Zhu-Nakamura surface hopping
+    Jingbai Li                 - Fewest switches surface hopping
+                                 Velocity verlet
+                                 Interface to OpenMolcas/BAGEL
+                                 Adaptive sampling (with enforcement)
+                                 QC/ML non-adiabatic molecular dynamics
+    Patrick Reiser	           - Neural networks (pyNNsMD)
 
     Special acknowledgment to:
       Steven A. Lopez	 - Project directorship
