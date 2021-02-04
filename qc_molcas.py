@@ -18,26 +18,40 @@ class MOLCAS:
         self.previous_movec = variables['previous_movec']
         self.keep_tmp       = variables['keep_tmp']
         self.verbose        = variables['verbose']
+        self.track_phase    = variables['track_phase']
 
         self.project        = variables['molcas_project']
         self.workdir        = variables['molcas_workdir']
+        self.calcdir        = variables['molcas_calcdir']
         self.molcas         = variables['molcas']
-        molcas_nproc        = variables['molcas_nproc']
-        molcas_mem          = variables['molcas_mem']
-        molcas_print        = variables['molcas_print']
-        omp_num_threads     = variables['omp_num_threads']
+        self.molcas_nproc   = variables['molcas_nproc']
+        self.molcas_mem     = variables['molcas_mem']
+        self.molcas_print   = variables['molcas_print']
+        self.threads        = variables['omp_num_threads']
+        self.read_nac       = variables['read_nac']
+        self.use_hpc        = variables['use_hpc']
 
         if id != None:
-            self.workdir    = '%s-%s' % (self.workdir,id)
+            self.calcdir    = '%s/tmp_MOLCAS-%s' % (self.calcdir,id)
+        else:
+            self.calcdir    = '%s/tmp_MOLCAS' % (self.calcdir)
+
+        if   self.workdir == 'AUTO':
+            if os.path.exists('/srv/tmp') == True:
+                self.workdir= '/srv/tmp/%s/%s/%s' % (os.environ['USER'],self.calcdir.split('/')[-2],self.calcdir.split('/')[-1])
+            else:
+                self.workdir= '/tmp/%s/%s/%s' % (os.environ['USER'],self.calcdir.split('/')[-2],self.calcdir.split('/')[-1])
+        elif self.workdir == None:
+            self.workdir    = self.calcdir
 
         ## set environment variables
         os.environ['MOLCAS_PROJECT']  = self.project   # the input name is fixed!
         os.environ['MOLCAS']          = self.molcas
-        os.environ['MOLCAS_NPROC']    = molcas_nproc
-        os.environ['MOLCAS_MEM']      = molcas_mem
-        os.environ['MOLCAS_PRINT']    = molcas_print
+        os.environ['MOLCAS_NPROC']    = self.molcas_nproc
+        os.environ['MOLCAS_MEM']      = self.molcas_mem
+        os.environ['MOLCAS_PRINT']    = self.molcas_print
         os.environ['MOLCAS_WORKDIR']  = self.workdir
-        os.environ['OMP_NUM_THREADS'] = omp_num_threads
+        os.environ['OMP_NUM_THREADS'] = self.threads
 
         ## Generate gradient and nac part
         alaska = ''
@@ -54,41 +68,89 @@ class MOLCAS:
             input=template.read()
         si_input ='%s\n%s' % (input,alaska)
 
+        if os.path.exists(self.calcdir) == False:
+            os.makedirs(self.calcdir)
+
         if os.path.exists(self.workdir) == False:
             os.makedirs(self.workdir)
 
-        with open('%s/%s.inp' % (self.workdir,self.project),'w') as out:
+        with open('%s/%s.inp' % (self.calcdir,self.project),'w') as out:
             out.write(si_input)
+
+    def _setup_hpc():
+        if os.path.exists('%s.slurm' % (self.project)) == True:
+            with open('%s.slurm' % (self.project)) as template:
+                submission=template.read()
+        else:
+            submission=''
+        submission+="""
+export INPUT=%s
+export WORKDIR=%s
+export MOLCAS_NPROCS=%s
+export MOLCAS_MEM=%s
+export MOLCAS_PRINT=%s
+export OMP_NUM_THREADS=%s
+export MOLCAS=%s
+export PATH=$MOLCAS/bin:$PATH
+
+if [ -d "/srv/tmp" ]
+then
+ export LOCAL_TMP=/srv/tmp
+else
+ export LOCAL_TMP=/tmp
+fi
+
+export MOLCAS_PROJECT=$INPUT
+export MOLCAS_WORKDIR=$LOCAL_TMP/$USER/$SLURM_JOB_ID
+mkdir -p $MOLCAS_WORKDIR/$MOLCAS_PROJECT
+
+cd $WORKDIR
+$MOLCAS/bin/pymolcas -f $INPUT.inp -b 1
+rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
+        """ % (self.project,\
+               self.calcdir,\
+               self.molcas_nproc,\
+               self.molcas_mem,\
+               self.molcas_print,\
+               self.threads,\
+               self.molcas)
+
+        with open('%s/%s.sbatch' % (self.calcdir,self.project),'w') as out:
+            out.write(submission)
+
 
     def _setup_molcas(self,x):
         ## prepare .xyz .StrOrb files
 
         self.natom=len(x)
-        with open('%s/%s.xyz' % (self.workdir,self.project),'w') as out:
+        with open('%s/%s.xyz' % (self.calcdir,self.project),'w') as out:
             xyz='%s\n\n%s' % (self.natom,Printcoord(x))
             out.write(xyz)
-        if   os.path.exists('%s.StrOrb' % (self.project)) == True and os.path.exists('%s/%s.RasOrb' % (self.workdir,self.project)) == False:
-            shutil.copy2('%s.StrOrb' % (self.project),'%s/%s.StrOrb' % (self.workdir,self.project))
-        elif os.path.exists('%s.StrOrb' % (self.project)) == True and os.path.exists('%s/%s.RasOrb' % (self.workdir,self.project)) == True:
-            shutil.copy2('%s/%s.RasOrb' % (self.workdir,self.project),'%s/%s.StrOrb' % (self.workdir,self.project))
+        if   os.path.exists('%s.StrOrb' % (self.project)) == True and os.path.exists('%s/%s.RasOrb' % (self.calcdir,self.project)) == False:
+            shutil.copy2('%s.StrOrb' % (self.project),'%s/%s.StrOrb' % (self.calcdir,self.project))
+        elif os.path.exists('%s.StrOrb' % (self.project)) == True and os.path.exists('%s/%s.RasOrb' % (self.calcdir,self.project)) == True:
+            shutil.copy2('%s/%s.RasOrb' % (self.calcdir,self.project),'%s/%s.StrOrb' % (self.calcdir,self.project))
         else:
             print('Molcas: missing guess orbital .StrOrb ')
             exit()
 
     def _run_molcas(self):
         maindir=os.getcwd()
-        os.chdir(self.workdir)
-        subprocess.run('%s/bin/pymolcas -f %s/%s.inp -b 1' % (self.molcas,self.workdir,self.project),shell=True)
-        subprocess.run('cp %s/%s/*.h5      %s' % (self.workdir,self.project,self.workdir),shell=True)  # sometimes, Molcas doesn't copy these orbital files
-       	subprocess.run('cp %s/%s/*Orb*     %s' % (self.workdir,self.project,self.workdir),shell=True)
-       	subprocess.run('cp %s/%s/*molden*  %s' % (self.workdir,self.project,self.workdir),shell=True)
-        shutil.rmtree(self.project)
+        os.chdir(self.calcdir)
+        if self.use_hpc == 1:
+            subprocess.run('sbatch -W %s/%s.sbatch' % (self.calcdir,self.project),shell=True)
+        else:
+            subprocess.run('%s/bin/pymolcas -f %s/%s.inp -b 1' % (self.molcas,self.calcdir,self.project),shell=True)
+            subprocess.run('cp %s/%s/*.h5      %s' % (self.workdir,self.project,self.calcdir),shell=True)  # sometimes, Molcas doesn't copy these orbital files
+       	    subprocess.run('cp %s/%s/*Orb*     %s' % (self.workdir,self.project,self.calcdir),shell=True)
+       	    subprocess.run('cp %s/%s/*molden*  %s' % (self.workdir,self.project,self.calcdir),shell=True)
+            shutil.rmtree('%s/%s' % (self.workdir,self.project))
         os.chdir(maindir)
 
     def _read_molcas(self):
-        with open('%s/%s.log' % (self.workdir,self.project),'r') as out:
+        with open('%s/%s.log' % (self.calcdir,self.project),'r') as out:
             log  = out.read().splitlines()
-        h5data   = h5py.File('%s/%s.rasscf.h5' % (self.workdir,self.project),'r')
+        h5data   = h5py.File('%s/%s.rasscf.h5' % (self.calcdir,self.project),'r')
         natom    = self.natom
         casscf   = []
         gradient = []
@@ -115,17 +177,22 @@ class MOLCAS:
             elif """Active orbitals""" in line and active == 0:
                 active=int(line.split()[-1])
 
-        energy   = np.array(casscf)
+        energy   = np.array(casscf)[0:self.ci]
         gradient = np.array(gradient)
         nac      = np.array(nac)
         norb     = int(len(movec)**0.5)
         movec    = movec[inactive*norb:(inactive+active)*norb]
         movec    = np.array(movec).reshape([active,norb])
 
+        if self.read_nac != 1:
+            nac  = np.zeros([int(self.ci*(self.ci-1)/2),self.natom,3])
+
         return energy,gradient,nac,civec,movec
 
     def _phase_correction(self,x,nac,civec,movec):
         ## decide wheter to follow previous or search in data set
+        ## current implementation only support cas(2,2)
+        ## in other cases use phase_less_loss instead
 
         if   self.previous_civec is None and self.previous_movec is None:
             ## ci and mo of this geometry will be used as reference and do not apply phase correction 
@@ -141,7 +208,6 @@ class MOLCAS:
         nac   = (nac.T*cifactor).T
         civec = ((civec*mofactor).T*ciphase).T
         movec = (movec.T*mophase).T
-         
 
         return nac,civec,movec
 
@@ -174,7 +240,6 @@ class MOLCAS:
 
         return cioverlap,ciphase,np.array(cifactor)
 
-
     def appendix(self,addons):
         ## appendix function to add ci and mo vectors
         self.previous_civec = addons['pciv']
@@ -183,11 +248,14 @@ class MOLCAS:
 
     def evaluate(self,x):
         self._setup_molcas(x)
+        if self.use_hpc == 1:
+            self._setup_hpc()
         self._run_molcas()
         energy,gradient,nac,civec,movec=self._read_molcas()
-        nac,civec,movec=self._phase_correction(x,nac,civec,movec)
+        if self.track_phase == 1:
+            nac,civec,movec=self._phase_correction(x,nac,civec,movec)
         if self.keep_tmp == 0:
-            shutil.rmtree(self.workdir)
+            shutil.rmtree(self.calcdir)
 
         return {
                 'energy'   : energy,

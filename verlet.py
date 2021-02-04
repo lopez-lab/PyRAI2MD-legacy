@@ -3,9 +3,10 @@
 
 import numpy as np
 
-def NoseHoover(traj,init=1):
+def NoseHoover(traj):
     ## This function calculate velocity scale factor by Nose Hoover thermo stat from t to t/2
 
+    iter     = traj['iter']
     natom    = traj['natom']
     V        = traj['V']
     Ekin     = traj['Ekin']
@@ -15,7 +16,7 @@ def NoseHoover(traj,init=1):
     kb       = 3.16881*10**-6
     fs_to_au = 2.4188843265857*10**-2
 
-    if init == 1:
+    if iter == 1:
         freq=1/(22/fs_to_au) ## 22 fs to au Hz
         Q1=3*natom*temp*kb/freq**2
         Q2=temp*kb/freq**2
@@ -44,13 +45,14 @@ def NoseHoover(traj,init=1):
 
     return V,Vs,Ekin
 
-def VerletI(traj,init=1):
+def VerletI(traj):
     ## This function update nuclear position
     ## R in Angstrom, 1 Bohr = 0.529177 Angstrom
     ## V in Bohr/au
     ## G in Eh/Bohr
     ## M in atomic unit
 
+    iter  = traj['iter']
     R     = traj['R']
     V     = traj['V']
     G     = traj['G']
@@ -58,21 +60,23 @@ def VerletI(traj,init=1):
     t     = traj['size']
     state = traj['state']
 
-    if init > 1:
+    if iter > 1:
         G = G[state-1]
         R+= (V*t-0.5*G/M*t**2)*0.529177    
     return R
 
-def VerletII(traj,init=1):
+def VerletII(traj):
     ## This function update velocity
+
+    iter  = traj['iter']
     M     = traj['M']
     G     = traj['G']
-    G0    = traj['G0']
+    G0    = traj['Gp']
     V     = traj['V']
     t     = traj['size']
     state = traj['state']
 
-    if init > 1:
+    if iter > 1:
         G0= G0[state-1]
         G = G[state-1]
         V-= 0.5*(G0+G)/M*t

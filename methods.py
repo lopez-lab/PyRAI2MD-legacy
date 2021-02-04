@@ -2,6 +2,7 @@
 ## Jingbai Li Jul 11 2020 
 
 from qc_molcas import MOLCAS
+from qc_bagel import BAGEL
 from model_NN import DNN
 from model_GP import GPR
 
@@ -12,6 +13,7 @@ class QM:
     def __init__(self,qm,variables_all,id=None):
         qm_list  = {
         'molcas' : MOLCAS, ## this will be classes
+        'bagel'  : BAGEL,
         'nn'     : DNN,
         'gp'     : GPR,
         }

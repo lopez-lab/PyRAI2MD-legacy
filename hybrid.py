@@ -7,10 +7,10 @@ from periodic_table import Element
 from verlet import NoseHoover, VerletI, VerletII
 from surfacehopping import FSSH,GSH,NOSH
 from tools import Printcoord,NACpairs
-class AIMD:
-    ## This class propagate nuclear position based on Velocity Verlet algorithm
+class MIXAIMD:
+    ## This class propagate nuclear position based on Velocity Verlet algorithm with hybrid QC/ML methods
 
-    def __init__(self,variables_all,QM=None,id=None,dir=None):
+    def __init__(self,variables_all,QM=None,REF=None,id=None,dir=None):
         ## T     : list 
         ##         Atom list
         ## R     : np.array
@@ -71,6 +71,7 @@ class AIMD:
         self.stop      = 0      ## stop aimd once error exceed maxerr
         self.traj      = variables_all['md'].copy()
         self.QM        = QM
+        self.REF       = REF
         self.traj.update({
         'title'   : title,      ## name of calculation       
         'logpath' : os.getcwd(),## output directory
@@ -109,6 +110,9 @@ class AIMD:
         'MD_hist' :[],          ## md history
                          })
 
+        self.choose_e      = ['qm','ref'][self.traj['ref_e']]
+        self.choose_g  	   = ['qm','ref'][self.traj['ref_g']]
+        self.choose_n  	   = ['qm','ref'][self.traj['ref_n']]
         self.traj['old']   = self.traj['root']
         self.traj['state'] = self.traj['root']
         self.record        = self.traj['record'] ## whether to record MD_hist
@@ -157,8 +161,8 @@ class AIMD:
 
     def _propagate(self):
         # update previous-preivous and previous coordinates and kinetic energies
-        self.traj['Rpp']   = self.traj['Rp'].copy()
-        self.traj['Rp']    = self.traj['R'].copy()
+        self.traj['Rpp']   = self.traj['Rp']
+        self.traj['Rp']    = self.traj['R']
         self.traj['Ekinpp']= self.traj['Ekinp']
         self.traj['Ekinp'] = self.traj['Ekin']
 
@@ -175,10 +179,10 @@ class AIMD:
 
     def _compute_properties(self,xyz):
         # update previous-previous and previous potential energies and forces
-        self.traj['Epp']  = self.traj['Ep'].copy()
-        self.traj['Ep']   = self.traj['E'].copy()
-        self.traj['Gpp']  = self.traj['Gp'].copy()
-        self.traj['Gp']   = self.traj['G'].copy()
+        self.traj['Epp']  = self.traj['Ep']
+        self.traj['Ep']   = self.traj['E']
+        self.traj['Gpp']  = self.traj['Gp']
+        self.traj['Gp']   = self.traj['G']
 
         # update current potential energies and forces
         addons={
@@ -188,19 +192,45 @@ class AIMD:
         qm = self.QM
         qm.appendix(addons)
 
-        results = qm.evaluate(xyz)
-        self.traj['E']    = results['energy']
-        self.traj['G']    = results['gradient']
-        self.traj['N']    = results['nac']
-        self.traj['pciv'] = results['civec'] 
-        self.traj['pmov'] = results['movec']
-        self.traj['err_e']= results['err_e']
-        self.traj['err_g']= results['err_g']
-        self.traj['err_n']= results['err_n']
+        ref = self.REF
+        ref.appendix(addons)
+
+        qm_results = qm.evaluate(xyz)
+        ref_results = ref.evaluate(xyz)
+
+        self.traj['pciv'] = ref_results['civec']
+        self.traj['pmov'] = ref_results['movec']
+
+
+        results={
+                'qm'  : {
+                        'energy'   : qm_results['energy'],
+                        'gradient' : qm_results['gradient'],
+                        'nac'      : qm_results['nac'],
+                        'err_e'    : qm_results['err_e'],
+                        'err_g'    : qm_results['err_g'],
+                        'err_n'    : qm_results['err_n'],
+                         },
+                'ref' : {
+       	       	       	'energy'   : ref_results['energy'],
+                        'gradient' : ref_results['gradient'],
+                        'nac'      : ref_results['nac'],
+                        'err_e'    : ref_results['err_e'],
+                        'err_g'    : ref_results['err_g'],
+                        'err_n'    : ref_results['err_n'],
+                         },
+                 }
+
+        self.traj['E']    = results[self.choose_e]['energy']
+        self.traj['err_e']= results[self.choose_e]['err_e']
+        self.traj['G']    = results[self.choose_g]['gradient']
+        self.traj['err_g']= results[self.choose_g]['err_g']
+        self.traj['N']    = results[self.choose_n]['nac']
+        self.traj['err_n']= results[self.choose_n]['err_n']
 
         if self.record == 1:
-            self.traj['MD_hist'].append([xyz,results['energy'].tolist(),results['gradient'].tolist(),results['nac'].tolist(),\
-                                             results['err_e'],          results['err_g'],            results['err_n']])    # convert all to list
+            self.traj['MD_hist'].append([xyz,results[self.choose_e]['energy'].tolist(),results[self.choose_g]['gradient'].tolist(),results[self.choose_n]['nac'].tolist(),\
+                                             results[self.choose_e]['err_e'],          results[self.choose_g]['err_g'],            results[self.choose_n]['err_n']]) # convert all to list
 
     def _thermostat(self):
         if self.traj['thermo'] == 1:

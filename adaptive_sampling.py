@@ -17,25 +17,30 @@ class AdaptiveSampling:
     def __init__(self,variables_all):
 
         ## variables for generating initcond
-        md             = variables_all['md']
-        initcond       = md['initcond']
-        nesmb          = md['nesmb']
-        method         = md['method']
-        format         = md['format']
-        gl_seed        = md['gl_seed']
-        temp           = md['temp']
+        md                = variables_all['md']
+        initcond          = md['initcond']
+        nesmb             = md['nesmb']
+        method            = md['method']
+        format            = md['format']
+        gl_seed           = md['gl_seed']
+        temp              = md['temp']
 
         ## variables for controling workflow
-        control        = variables_all['control']
-        self.version   = variables_all['version']
-        self.qm        = control['qm']
-        self.abinit    = control['abinit']
-        self.ml_ncpu   = control['ml_ncpu']
-        self.qc_ncpu   = control['qc_ncpu']
-        self.title     = control['title']
-        self.maxiter   = control['maxiter']
-       	self.load      = control['load']
-        self.transfer  = control['transfer']
+        control           = variables_all['control']
+        self.version      = variables_all['version']
+        self.qm           = control['qm']
+        self.abinit       = control['abinit']
+        self.ml_ncpu      = control['ml_ncpu']
+        self.qc_ncpu      = control['qc_ncpu']
+        self.title        = control['title']
+        self.maxiter      = control['maxiter']
+        self.refine       = control['refine']
+       	self.refine_num   = control['refine_num']
+       	self.refine_start = control['refine_start']
+       	self.refine_end   = control['refine_end']
+       	self.load         = control['load']
+        self.transfer     = control['transfer']
+        self.pop_step     = control['pop_step']
         self.variables = variables_all.copy() # hard copy all input variables, so I can change them safely
         self.threshold = {
         'maxsample'    : control['maxsample'],
@@ -49,16 +54,16 @@ class AdaptiveSampling:
         }
 
         ## trajectories properties
-        self.iter      = 0                            # number of search iteration
-        self.ntraj     = nesmb                        # number of trajectories
-        self.initcond  = [[] for x in range(nesmb)]   # initial conditions
-        self.selec_geo = [[] for x in range(nesmb)]   # selected geometries for QC calculation
-        self.selec_e   = [[] for x in range(nesmb)]   # error of energy
-        self.index_e   = [[] for x in range(nesmb)]   # index of selected geometry based on energy error
-        self.selec_g   = [[] for x in range(nesmb)]   # error of gradient
-        self.index_g   = [[] for x in range(nesmb)]   # index of selected geometry based on gradient error
-        self.selec_n   = [[] for x in range(nesmb)]   # error of nac
-        self.index_n   = [[] for x in range(nesmb)]   # index of selected geometry based on nac error
+        self.iter         = 0                            # number of search iteration
+        self.ntraj        = nesmb                        # number of trajectories
+        self.initcond     = [[] for x in range(nesmb)]   # initial conditions
+        self.selec_geo    = [[] for x in range(nesmb)]   # selected geometries for QC calculation
+        self.selec_e      = [[] for x in range(nesmb)]   # error of energy
+        self.index_e      = [[] for x in range(nesmb)]   # index of selected geometry based on energy error
+        self.selec_g      = [[] for x in range(nesmb)]   # error of gradient
+        self.index_g      = [[] for x in range(nesmb)]   # index of selected geometry based on gradient error
+        self.selec_n      = [[] for x in range(nesmb)]   # error of nac
+        self.index_n      = [[] for x in range(nesmb)]   # index of selected geometry based on nac error
 
         np.random.seed(gl_seed)
         trvm=Sampling(self.title,nesmb,gl_seed,temp,method,format)
@@ -101,17 +106,23 @@ class AdaptiveSampling:
             geom+=xyz
         variables_wrapper=[[n,xyz]for n,xyz in enumerate(geom)]
         ngeom=len(variables_wrapper)
-
         ## adjust multiprocessing if necessary
         ncpu = np.amin([ngeom,self.qc_ncpu])
 
         ## start multiprocessing
-        results=[[] for x in range(ngeom)]
+        qc_results=[[] for x in range(ngeom)]
         pool=multiprocessing.Pool(processes=ncpu)
         for val in pool.imap_unordered(self._abinit_wrapper,variables_wrapper):
             geom_id,xyz,energy,gradient,nac,civec,movec=val
-            results[geom_id]=[xyz,energy.tolist(),gradient.tolist(),nac.tolist(),civec.tolist(),movec.tolist()]
+            qc_results[geom_id]=[xyz,energy.tolist(),gradient.tolist(),nac.tolist(),civec.tolist(),movec.tolist()]
         pool.close()
+
+        ## check qc results and exclude non-converged ones
+        results=[]
+        for i in qc_results:
+            if len(i[2]) > 0 and len(i[3]) > 0:
+                results.append(i)
+
         return results
 
     def _abinit_wrapper(self,selec_geom):
@@ -148,24 +159,26 @@ class AdaptiveSampling:
         minerr_n      = self.threshold['minnac']
 
         checkpoint={
-        'geom'    : [],
-        'energy'  : [],
-        'gradient': [],
-        'nac'     : [],
-        'err_e'   : [],
-        'err_g'   : [],
-        'err_n'   : [],
-        'minerr_e': minerr_e,
-        'minerr_g': minerr_g,
-        'minerr_n': minerr_n,
-        'max_e'   : 0,
-       	'max_g'	  : 0,
-       	'max_n'	  : 0,
-        'new_geom': [],
+        'geom'     : [],
+        'energy'   : [],
+        'gradient' : [],
+        'nac'      : [],
+        'err_e'    : [],
+        'err_g'    : [],
+        'err_n'    : [],
+        'minerr_e' : minerr_e,
+        'minerr_g' : minerr_g,
+        'minerr_n' : minerr_n,
+        'max_e'    : 0,
+       	'max_g'	   : 0,
+       	'max_n'	   : 0,
+        'new_geom' : [],
+        'uncertain': [],
+        'pop'      : [],
         }
 
         for ntraj in range(self.ntraj):
-            geo,e,g,n,err_e,err_g,err_n=np.array(md_traj[ntraj]).T
+            geo,e,g,n,err_e,err_g,err_n,pop=np.array(md_traj[ntraj]).T
 
             ## pack data into checkpoing dict
             checkpoint['geom'].append(geo.tolist())    # all geometries
@@ -175,6 +188,7 @@ class AdaptiveSampling:
             checkpoint['err_e'].append(err_e.tolist()) # all prediction	error in energies
        	    checkpoint['err_g'].append(err_g.tolist()) # all prediction	error in forces
        	    checkpoint['err_n'].append(err_n.tolist()) # all prediction error in NACs
+            checkpoint['pop'].append(pop.tolist())     # all populations
 
             if np.amax(err_e) > checkpoint['max_e']:
                 checkpoint['max_e'] = np.amax(err_e)   # max prediction error in energies
@@ -192,14 +206,34 @@ class AdaptiveSampling:
             index_e = np.argwhere(err_e > minerr_e)
             selec_e = err_e[index_e.reshape(-1)]
             index_g = np.argwhere(err_g > minerr_g)           
-       	    selec_g = err_e[index_g.reshape(-1)]
+       	    selec_g = err_g[index_g.reshape(-1)]
             index_n = np.argwhere(err_n > minerr_n)           
-       	    selec_n = err_e[index_n.reshape(-1)]
+       	    selec_n = err_n[index_n.reshape(-1)]
 
             ##  merge index and remove duplicate in selec_geom
             index_tot=np.concatenate((index_e,index_g)).astype(int)
             index_tot=np.concatenate((index_tot,index_n)).astype(int)
             index_tot=np.unique(index_tot)
+
+            ## record number of uncertain geometry before merging with refinement geometry
+            checkpoint['uncertain'].append(len(index_tot))
+
+            ## refine crossing region, optionally
+            if self.refine == 1:
+                e=np.array([np.array(x) for x in e])
+                state=len(e[0])
+                pair=int(state*(state-1)/2)
+                gap_e=np.zeros([len(e),pair])  # initialize gap matrix
+                pos=-1
+                for i in range(state):         # compute gap per pair of states
+                    for j in range(i+1,state):
+                        pos+=1
+                        gap_e[:,pos]=np.abs(e[:,i]-e[:,j])
+                gap_e=np.amin(gap_e,axis=1)    # pick the smallest gap per point
+                index_r = np.argsort(gap_e[self.refine_start:self.refine_end])[0:self.refine_num]
+                index_tot=np.concatenate((index_tot,index_r)).astype(int)
+                index_tot=np.unique(index_tot)
+
             self.selec_geo[ntraj] = np.array(geo)[index_tot].tolist()
             self.selec_e[ntraj]   = selec_e
             self.index_e[ntraj]   = index_e
@@ -208,7 +242,7 @@ class AdaptiveSampling:
        	    self.selec_n[ntraj]   = selec_n
             self.index_n[ntraj]   = index_n
 
-        checkpoint['new_geom'] = self.selec_geo        # new geometries
+        checkpoint['new_geom']    = self.selec_geo        # new geometries
 
         return checkpoint
 
@@ -293,36 +327,41 @@ class AdaptiveSampling:
         return None
 
     def _checkpoint(self,checkpoint_dict):
-        logpath  = os.getcwd()
-        geom     = checkpoint_dict['geom']
-        new_geom = checkpoint_dict['new_geom']
-        err_e    = checkpoint_dict['err_e']
-       	err_g  	 = checkpoint_dict['err_g']
-       	err_n  	 = checkpoint_dict['err_n']
-        max_e    = checkpoint_dict['max_e']
-        max_g    = checkpoint_dict['max_g']
-        max_n    = checkpoint_dict['max_n']
-        minerr_e = checkpoint_dict['minerr_e']
-        minerr_g = checkpoint_dict['minerr_g']
-        minerr_n = checkpoint_dict['minerr_n']
+        logpath     = os.getcwd()
+        geom        = checkpoint_dict['geom']
+        uncertain   = checkpoint_dict['uncertain']
+        new_geom    = checkpoint_dict['new_geom']
+        err_e       = checkpoint_dict['err_e']
+       	err_g  	    = checkpoint_dict['err_g']
+       	err_n  	    = checkpoint_dict['err_n']
+        max_e       = checkpoint_dict['max_e']
+        max_g       = checkpoint_dict['max_g']
+        max_n       = checkpoint_dict['max_n']
+        minerr_e    = checkpoint_dict['minerr_e']
+        minerr_g    = checkpoint_dict['minerr_g']
+        minerr_n    = checkpoint_dict['minerr_n']
+        pop         = checkpoint_dict['pop']
 
-        converged = 0
-        found     = 0
-
+        converged   = 0
+        refinement  = 0
+        found       = 0
+        all_geom    = 0
         traj_info='  &adaptive sampling progress\n'
         for i in range(self.ntraj):
             marker=''
-            if len(new_geom[i]) == 0:
+            if uncertain[i] == 0:
                 converged+=1
                 marker='*'
-            traj_info+='  Traj %6s: %8s steps found %8s new geometries => MaxErr(Energy: %8.4f Gradient: %8.4f NAC: %8.4f) %s\n' % (i+1,len(geom[i]),len(new_geom[i]),np.amax(err_e[i]),np.amax(err_g[i]),np.amax(err_n[i]),marker)
-            found += len(new_geom[i])
+            traj_info+='  Traj %6s: %8s steps found %8s new geometries => MaxErr(Energy: %8.4f Gradient: %8.4f NAC: %8.4f) %s\n' % (i+1,len(geom[i]),uncertain[i],np.amax(err_e[i]),np.amax(err_g[i]),np.amax(err_n[i]),marker)
+            found += uncertain[i]
+            all_geom+=len(new_geom[i])
 
+        refinement=all_geom-found
 
         log_info="""
 %s
 
-  &adaptive sampling iter %s : converged %s of %s found %s new geometries
+  &adaptive sampling iter %s : converged %s of %s found %s new geometries (%s refinement)
 
                  the largest error
 -------------------------------------------------------
@@ -330,7 +369,7 @@ class AdaptiveSampling:
   Gradient:                 %8.4f   %8.4f  %6s
   Non-adiabatic coupling:   %8.4f   %8.4f  %6s
 
-""" % (traj_info,self.iter, converged, self.ntraj,found,\
+""" % (traj_info,self.iter, converged, self.ntraj,found,refinement,\
        max_e, minerr_e, max_e<=minerr_e,\
        max_g, minerr_g, max_g<=minerr_g,\
        max_n, minerr_n, max_n<=minerr_n)
@@ -339,6 +378,18 @@ class AdaptiveSampling:
         mdlog=open('%s/%s.log' % (logpath,self.title),'a')
         mdlog.write(log_info)
         mdlog.close()
+
+        average_pop=[]
+        for p in pop:
+            if len(p) >= self.pop_step:
+                average_pop.append(p[0:self.pop_step])
+        average_pop=np.mean(average_pop,axis=0)
+        pop_info=''
+        for n,p in enumerate(average_pop):
+            pop_info+='%-5s%s\n'% (n,' '.join(['%24.16f ' % (x) for x in p]))
+        mdpop=open('%s/%s-%s.pop' % (logpath,self.title,self.iter),'w')
+        mdpop.write(pop_info)
+        mdpop.close()
 
         #savethis={self.iter:checkpoint_dict} ## This saves too much !!
         savethis={
@@ -356,7 +407,7 @@ class AdaptiveSampling:
             with open('%s/%s.adaptive.json' % (logpath,self.title), 'w') as outfile:
                 json.dump(savethis,outfile)
 
-        return converged
+        return converged,refinement
 
     def _heading(self):
 
@@ -394,13 +445,17 @@ class AdaptiveSampling:
             self._train_model()
             md_traj=self._run_aimd()
             checkpoint_dict=self._screen_error(md_traj)
-            converged=self._checkpoint(checkpoint_dict)
+            converged,refinement=self._checkpoint(checkpoint_dict)
 
-            if converged != self.ntraj:
-                results=self._run_abinit()
-                self._update_train_set(results)
+            if self.iter > self.maxiter:
+                break
             else:
-       	       	break
+                if converged == self.ntraj and refinement == 0:
+                    break
+                else:
+                    results=self._run_abinit()
+                    self._update_train_set(results)
+
 
         end=time.time()
         walltime=self._howlong(start,end)

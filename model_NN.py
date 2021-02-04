@@ -3,8 +3,8 @@
 
 import time,datetime,json
 import numpy as np
-from nn_pes import NeuralNetPes
-from nn_pes_device import set_gpu
+from pyNNsMD.nn_pes import NeuralNetPes
+from pyNNsMD.nn_pes_src.device import set_gpu
 
 class DNN:
     ## This is the interface to GP
@@ -25,6 +25,7 @@ class DNN:
         set_gpu([]) #No GPU for prediction
         title                      = variables_all['control']['title']
         variables                  = variables_all['nn']
+        modeldir                   = variables['modeldir']
         data                       = variables['postdata']
         nn_eg_type                 = variables['nn_eg_type']
         nn_nac_type                = variables['nn_nac_type']
@@ -32,6 +33,52 @@ class DNN:
         hyp_nac                    = variables['nac'].copy()
         hyp_eg2                    = variables['eg2'].copy()
         hyp_nac2                   = variables['nac2'].copy()
+
+        ## setup l1 l2 dict
+        for model_dict in [hyp_eg,hyp_nac,hyp_eg2,hyp_nac2]:
+            for penalty in ['use_reg_activ','use_reg_weight','use_reg_bias']:
+                penalty_key='%s_dict' % (penalty)
+                if   model_dict[penalty] == 'l1':
+                    model_dict[penalty_key] = {
+                                              'class_name' : 'l1',
+                                              'config'     : {
+                                                             'l1':model_dict['reg_l1'],
+                                                             },
+                                              }
+                elif model_dict[penalty] == 'l2':
+                    model_dict[penalty_key] = {
+                                              'class_name' : 'l2',
+                                              'config'     : {
+                                                             'l2':model_dict['reg_l2'],
+                                                             },
+                                              }
+                elif model_dict[penalty] == 'l1_l2':
+                    model_dict[penalty_key] = {
+                                              'class_name' : 'l1_l2',
+                                              'config'     : {
+                                                             'l1':model_dict['reg_l1'],
+                                                             'l2':model_dict['reg_l2'],
+                                                             },
+                                              }
+                else:
+                    model_dict[penalty_key] = None
+
+        ## setup unit scheme
+        if variables['eg_unit'] == 'si':
+            hyp_eg['unit']   = ['eV','eV/A']
+       	    hyp_eg2['unit']  = ['eV','eV/A']
+        else:
+            hyp_eg['unit']   = ['Eh','Eh/Bohr']
+       	    hyp_eg2['unit']  = ['Eh','Eh/Bohr']
+        if variables['nac_unit'] == 'si':
+       	    hyp_nac['unit']  = 'eV/A'
+            hyp_nac2['unit'] = 'eV/A'
+        elif variables['nac_unit'] == 'au':
+            hyp_nac['unit']  = 'Eh/A'
+            hyp_nac2['unit'] = 'Eh/A'
+        elif variables['nac_unit'] == 'eha':
+       	    hyp_nac['unit']  = 'Eh/Bohr'
+       	    hyp_nac2['unit'] = 'Eh/Bohr'
 
         ## setup hypers
         hyp_dict_eg  ={
@@ -41,202 +88,148 @@ class DNN:
                       'model'      :{
                                     'atoms'                 : data['natom'],
                                     'states'                : data['nstate'], 
-                                    'Depth'                 : hyp_eg['Depth'],
                                     'nn_size'               : hyp_eg['nn_size'],
-                                    'use_invdist'           : True,
-                                    'invd_mean'             : data['mean_invr'],
-                                    'invd_std'              : data['std_invr'],
-                                    'use_bond_angles'       : False,
-                                    'angle_index'           : [],
-                                    'angle_mean'            : 2,   
-                                    'angle_std'             : 0.2,  
-                                    'use_dihyd_angles'      : False,
-                                    'dihyd_index'           : [],
-                                    'dihyd_mean'            : -1,
-                                    'dihyd_std'             : 2,  
-                                    'activ'                 : hyp_eg['activ'],
-                                    'activ_alpha'           : hyp_eg['activ_alpha'],
+                                    'depth'                 : hyp_eg['depth'],
+                                    'activ'                 : {
+                                                               'class_name' : hyp_eg['activ'],
+                                                               'config'     : {
+                                                                               'alpha' : hyp_eg['activ_alpha'],
+                                                                              },
+                                                              },
                                     'use_dropout'           : hyp_eg['use_dropout'],
                                     'dropout'               : hyp_eg['dropout'],
-                                    'use_reg_activ'         : hyp_eg['use_reg_activ'],
-                                    'use_reg_weight'        : hyp_eg['use_reg_weight'],
-                                    'use_reg_bias'          : hyp_eg['use_reg_bias'],
-                                    'reg_l1'                : hyp_eg['reg_l1'],
-                                    'reg_l2'                : hyp_eg['reg_l2'],
-                                    'loss_weights'          : hyp_eg['loss_weights'], 
-                                    'y_energy_mean'         : data['mean_energy'],
-                                    'y_energy_std'          : 1,                                   # data['std_energy']
-                                    'y_energy_unit_conv'    : 27.21138624598853,                   # conversion Hatree to eV after scaling
-                                    'y_gradient_unit_conv'  : 27.21138624598853/0.52917721090380,  # conversion from H/bohr to eV/A after scaling
+                                    'use_reg_activ'         : hyp_eg['use_reg_activ_dict'],
+                                    'use_reg_weight'        : hyp_eg['use_reg_weight_dict'],
+                                    'use_reg_bias'          : hyp_eg['use_reg_bias_dict'],
+                                    'invd_index'            : True,
+                                    'angle_index'           : [],
+                                    'dihyd_index'           : [],
                                     },
        	       	      'training'   :{
-                                    'reinit_weights'        : hyp_eg['reinit_weights'],
+                                    'auto_scaling'          : {
+                                                               'x_mean'               :hyp_eg['scale_x_mean'],
+                                                               'x_std'                :hyp_eg['scale_x_std'],
+                                                               'energy_mean'          :hyp_eg['scale_y_mean'],
+                                                               'energy_std'           :hyp_eg['scale_y_std'],
+                                                              },
+
+                                    'normalization_mode'    : hyp_eg['normalization_mode'],
+                                    'loss_weights'          : hyp_eg['loss_weights'],
+                                    'learning_rate'         : hyp_eg['learning_rate'],
+                                    'initialize_weights'    : hyp_eg['initialize_weights'],
                                     'val_disjoint'          : hyp_eg['val_disjoint'],
                                     'val_split'             : hyp_eg['val_split'],
                                     'epo'                   : hyp_eg['epo'],
-                                    'epomin'                : hyp_eg['epomin'],
-                                    'patience'              : hyp_eg['patience'],
-                                    'max_time'              : hyp_eg['max_time'],
                                     'batch_size'            : hyp_eg['batch_size'],
-                                    'delta_loss'            : hyp_eg['delta_loss'],
-                                    'factor_lr'             : hyp_eg['factor_lr'],
                                     'epostep'               : hyp_eg['epostep'],
-                                    'learning_rate_start'   : hyp_eg['learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_eg['learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_eg['learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_eg['epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,
+                                    'step_callback'         : {
+                                                               'use'                  : hyp_eg['use_step_callback'],
+                                                               'epoch_step_reduction' : hyp_eg['epoch_step_reduction'],
+                                                               'learning_rate_step'   : hyp_eg['learning_rate_step'],
+                                                              },
+                                    'linear_callback'       : {
+                                                               'use'                  : hyp_eg['use_linear_callback'],
+                                                               'learning_rate_start'  : hyp_eg['learning_rate_start'],
+                                                               'learning_rate_stop'   : hyp_eg['learning_rate_stop' ],
+                                                               'epomin'               : hyp_eg['epomin'],
+                                                              },
+       	       	       	       	    'early_callback'        : {
+                                                               'use'                  : hyp_eg['use_early_callback'],
+                                                               'epomin'               : hyp_eg['epomin'],
+                                                               'patience'             : hyp_eg['patience'],
+                                                               'max_time'             : hyp_eg['max_time'],
+                                                               'delta_loss'           : hyp_eg['delta_loss'],
+                                                               'loss_monitor'         : hyp_eg['loss_monitor'],
+                                                               'factor_lr'            : hyp_eg['factor_lr'],
+                                                               'learning_rate_start'  : hyp_eg['learning_rate_start'],
+                                                               'learning_rate_stop'   : hyp_eg['learning_rate_stop' ],
+                                                              },
+       	       	       	       	    'exp_callback'          : {
+                                                               'use'                  : hyp_eg['use_exp_callback'],
+                                                               'epomin'               : hyp_eg['epomin'],
+                                                               'factor_lr'            : hyp_eg['factor_lr'],
+                                                              },
        	       	                    },
-       	       	      'retraining' :{
-                                    'reinit_weights'        : hyp_eg['t_reinit_weights'],
-                                    'val_disjoint'          : hyp_eg['t_val_disjoint'],
-                                    'val_split'             : hyp_eg['t_val_split'],
-                                    'epo'                   : hyp_eg['t_epo'],
-                                    'epomin'                : hyp_eg['t_epomin'],
-                                    'patience'              : hyp_eg['t_patience'],
-                                    'max_time'              : hyp_eg['t_max_time'],
-                                    'batch_size'            : hyp_eg['t_batch_size'],
-                                    'delta_loss'            : hyp_eg['t_delta_loss'],
-                                    'factor_lr'             : hyp_eg['t_factor_lr'],
-                                    'epostep'               : hyp_eg['t_epostep'],
-                                    'learning_rate_start'   : hyp_eg['t_learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_eg['t_learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_eg['t_learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_eg['t_epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,            
-       	       	                    },
-                      'resample'   :{
-                                    'reinit_weights'        : hyp_eg['a_reinit_weights'],
-                                    'val_disjoint'          : hyp_eg['a_val_disjoint'],
-                                    'val_split'             : hyp_eg['a_val_split'],
-                                    'epo'                   : hyp_eg['a_epo'],
-                                    'epomin'                : hyp_eg['a_epomin'],
-                                    'patience'              : hyp_eg['a_patience'],
-                                    'max_time'              : hyp_eg['a_max_time'],
-                                    'batch_size'            : hyp_eg['a_batch_size'],
-                                    'delta_loss'            : hyp_eg['a_delta_loss'],
-                                    'factor_lr'             : hyp_eg['a_factor_lr'],
-                                    'epostep'               : hyp_eg['a_epostep'],
-                                    'learning_rate_start'   : hyp_eg['a_learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_eg['a_learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_eg['a_learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_eg['a_epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True, 	
+       	       	      'plots'      :{
+                                    'unit_energy'           : hyp_eg['unit'][0],
+       	       	       	       	    'unit_gradient'         : hyp_eg['unit'][1],
        	       	                    },
                       }
+
         hyp_dict_nac ={
                       'general'    :{
                                     'model_type'            : hyp_nac['model_type'],
                                     },
                       'model'      :{
                                     'atoms'                 : data['natom'],
-                                    'states'                : data['npair'], 
-                                    'Depth'                 : hyp_nac['Depth'],
+                                    'states'                : data['nstate'], 
                                     'nn_size'               : hyp_nac['nn_size'],
-                                    'use_invdist'           : True,
-                                    'invd_mean'             : data['mean_invr'],
-                                    'invd_std'              : data['std_invr'],
-                                    'use_bond_angles'       : False,
-                                    'angle_index'           : [],
-                                    'angle_mean'            : 2,   
-                                    'angle_std'             : 0.2,  
-                                    'use_dihyd_angles'      : False,
-                                    'dihyd_index'           : [],
-                                    'dihyd_mean'            : -1,
-                                    'dihyd_std'             : 2,
-                                    'activ'                 : hyp_nac['activ'],
-                                    'activ_alpha'           : hyp_nac['activ_alpha'],  
+                                    'depth'                 : hyp_nac['depth'],
+                                    'activ'                 : {
+                                                               'class_name' : hyp_nac['activ'],
+                                                               'config'     : {
+                                                                               'alpha' : hyp_nac['activ_alpha'],
+                                                                              },
+                                                              },
                                     'use_dropout'           : hyp_nac['use_dropout'],
                                     'dropout'               : hyp_nac['dropout'],
-                                    'use_reg_activ'         : hyp_nac['use_reg_activ'],
-                                    'use_reg_weight'        : hyp_nac['use_reg_weight'],
-                                    'use_reg_bias'          : hyp_nac['use_reg_bias'],
-                                    'reg_l1'                : hyp_nac['reg_l1'],
-                                    'reg_l2'                : hyp_nac['reg_l2'],
-                                    'y_nac_mean'            : 0,                  # data['mean_nac'],
-                                    'y_nac_std'             : 1,                  #data['std_nac']
-                                    'y_nac_unit_conv'       : 1/0.52917721090380, # conversion 1/Bohr to 1/A after scaling!!
-                                    'phase_less_loss'       : hyp_nac['phase_less_loss'],
+                                    'use_reg_activ'         : hyp_nac['use_reg_activ_dict'],
+                                    'use_reg_weight'        : hyp_nac['use_reg_weight_dict'], 
+                                    'use_reg_bias'          : hyp_nac['use_reg_bias_dict'],
+                                    'invd_index'            : True,
+                                    'angle_index'           : [],
+                                    'dihyd_index'           : [],
                                     },
        	       	      'training'   :{
+                                    'auto_scaling'          : {
+                                                               'x_mean'               :hyp_nac['scale_x_mean'],
+                                                               'x_std'                :hyp_nac['scale_x_std'],
+                                                               'nac_mean'             :hyp_nac['scale_y_mean'],
+                                                               'nac_std'              :hyp_nac['scale_y_std'],
+                                                              },
+                                    'normalization_mode'    : hyp_nac['normalization_mode'],
+                                    'learning_rate'         : hyp_nac['learning_rate'],
                                     'phase_less_loss'       : hyp_nac['phase_less_loss'],
-                                    'reinit_weights'        : hyp_nac['reinit_weights'],
+                                    'initialize_weights'    : hyp_nac['initialize_weights'],
                                     'val_disjoint'          : hyp_nac['val_disjoint'],
                                     'val_split'             : hyp_nac['val_split'],
                                     'epo'                   : hyp_nac['epo'],
                                     'pre_epo'               : hyp_nac['pre_epo'],
-                                    'epomin'                : hyp_nac['epomin'],
-                                    'patience'              : hyp_nac['patience'],
-                                    'max_time'              : hyp_nac['max_time'],
                                     'batch_size'            : hyp_nac['batch_size'],
-                                    'delta_loss'            : hyp_nac['delta_loss'],
-                                    'factor_lr'             : hyp_nac['factor_lr'],
                                     'epostep'               : hyp_nac['epostep'],
-                                    'learning_rate_start'   : hyp_nac['learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_nac['learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_nac['learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_nac['epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,
+                                    'step_callback'         : {
+                                                               'use'                  : hyp_nac['use_step_callback'],
+                                                               'epoch_step_reduction' : hyp_nac['epoch_step_reduction'],
+                                                               'learning_rate_step'   : hyp_nac['learning_rate_step'],
+                                                              },
+                                    'linear_callback'       : {
+                                                               'use'                  : hyp_nac['use_linear_callback'],
+                                                               'learning_rate_start'  : hyp_nac['learning_rate_start'],
+                                                               'learning_rate_stop'   : hyp_nac['learning_rate_stop' ],
+                                                               'epomin'               : hyp_nac['epomin'],
+                                                              },
+       	       	       	       	    'early_callback'        : {
+                                                               'use'                  : hyp_nac['use_early_callback'],
+                                                               'epomin'               : hyp_nac['epomin'],
+                                                               'patience'             : hyp_nac['patience'],
+                                                               'max_time'             : hyp_nac['max_time'],
+                                                               'delta_loss'           : hyp_nac['delta_loss'],
+                                                               'loss_monitor'         : hyp_nac['loss_monitor'],
+                                                               'factor_lr'            : hyp_nac['factor_lr'],
+                                                               'learning_rate_start'  : hyp_nac['learning_rate_start'],
+                                                               'learning_rate_stop'   : hyp_nac['learning_rate_stop' ],
+                                                              },
+       	       	       	       	    'exp_callback'          : {
+                                                               'use'                  : hyp_nac['use_exp_callback'],
+                                                               'epomin'               : hyp_nac['epomin'],
+                                                               'factor_lr'            : hyp_nac['factor_lr'],
+                                                              },
        	       	                    },
-       	       	      'retraining' :{
-                                    'phase_less_loss'       : hyp_nac['phase_less_loss'],
-                                    'reinit_weights'        : hyp_nac['t_reinit_weights'],
-                                    'val_disjoint'          : hyp_nac['t_val_disjoint'],
-                                    'val_split'             : hyp_nac['t_val_split'],
-                                    'epo'                   : hyp_nac['t_epo'],
-                                    'pre_epo'               : hyp_nac['t_pre_epo'],
-                                    'epomin'                : hyp_nac['t_epomin'],
-                                    'patience'              : hyp_nac['t_patience'],
-                                    'max_time'              : hyp_nac['t_max_time'],
-                                    'batch_size'            : hyp_nac['t_batch_size'],
-                                    'delta_loss'            : hyp_nac['t_delta_loss'],
-                                    'factor_lr'             : hyp_nac['t_factor_lr'],
-                                    'epostep'               : hyp_nac['t_epostep'],
-                                    'learning_rate_start'   : hyp_nac['t_learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_nac['t_learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_nac['t_learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_nac['t_epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,            
-       	       	                    },
-                      'resample'   :{
-                                    'phase_less_loss'       : hyp_nac['phase_less_loss'],
-                                    'reinit_weights'        : hyp_nac['a_reinit_weights'],
-                                    'val_disjoint'          : hyp_nac['a_val_disjoint'],
-                                    'val_split'             : hyp_nac['a_val_split'],
-                                    'epo'                   : hyp_nac['a_epo'],
-                                    'pre_epo'               : hyp_nac['a_pre_epo'],
-                                    'epomin'                : hyp_nac['a_epomin'],
-                                    'patience'              : hyp_nac['a_patience'],
-                                    'max_time'              : hyp_nac['a_max_time'],
-                                    'batch_size'            : hyp_nac['a_batch_size'],
-                                    'delta_loss'            : hyp_nac['a_delta_loss'],
-                                    'factor_lr'             : hyp_nac['a_factor_lr'],
-                                    'epostep'               : hyp_nac['a_epostep'],
-                                    'learning_rate_start'   : hyp_nac['a_learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_nac['a_learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_nac['a_learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_nac['a_epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True, 	
+       	       	      'plots'      :{
+                                    'unit_nac'              : hyp_nac['unit'],
        	       	                    },
                       }
+
         hyp_dict_eg2 ={
                       'general'    :{
                                     'model_type'            : hyp_eg2['model_type'],
@@ -244,210 +237,168 @@ class DNN:
                       'model'      :{
                                     'atoms'                 : data['natom'],
                                     'states'                : data['nstate'], 
-                                    'Depth'                 : hyp_eg2['Depth'],
                                     'nn_size'               : hyp_eg2['nn_size'],
-                                    'use_invdist'           : True,
-                                    'invd_mean'             : data['mean_invr'],
-                                    'invd_std'              : data['std_invr'],
-                                    'use_bond_angles'       : False,
-                                    'angle_index'           : [],
-                                    'angle_mean'            : 2,   
-                                    'angle_std'             : 0.2,  
-                                    'use_dihyd_angles'      : False,
-                                    'dihyd_index'           : [],
-                                    'dihyd_mean'            : -1,
-                                    'dihyd_std'             : 2,
-                                    'activ'                 : hyp_eg2['activ'],
-                                    'activ_alpha'           : hyp_eg2['activ_alpha'],
+                                    'depth'                 : hyp_eg2['depth'],
+                                    'activ'                 : {
+                                                               'class_name' : hyp_eg2['activ'],
+                                                               'config'     : {
+                                                                               'alpha' : hyp_eg2['activ_alpha'],
+                                                                              },
+                                                              },
                                     'use_dropout'           : hyp_eg2['use_dropout'],
                                     'dropout'               : hyp_eg2['dropout'],
-                                    'use_reg_activ'         : hyp_eg2['use_reg_activ'],
-                                    'use_reg_weight'        : hyp_eg2['use_reg_weight'],
-                                    'use_reg_bias'          : hyp_eg2['use_reg_bias'],
-                                    'reg_l1'                : hyp_eg2['reg_l1'],
-                                    'reg_l2'                : hyp_eg2['reg_l2'],
-                                    'loss_weights'          : hyp_eg2['loss_weights'], 
-                                    'y_energy_mean'         : data['mean_energy'],
-                                    'y_energy_std'          : 1,                                   # data['std_energy']
-                                    'y_energy_unit_conv'    : 27.21138624598853,                   # conversion Hatree to eV after scaling
-                                    'y_gradient_unit_conv'  : 27.21138624598853/0.52917721090380,  # conversion from H/bohr to eV/A after scaling                                    },
+                                    'use_reg_activ'         : hyp_eg2['use_reg_activ_dict'],
+                                    'use_reg_weight'        : hyp_eg2['use_reg_weight_dict'], 
+                                    'use_reg_bias'          : hyp_eg2['use_reg_bias_dict'],
+                                    'invd_index'            : True,
+                                    'angle_index'           : [],
+                                    'dihyd_index'           : [],
                                     },
        	       	      'training'   :{
-                                    'reinit_weights'        : hyp_eg2['reinit_weights'],
+                                    'auto_scaling'          : {
+                                                               'x_mean'               :hyp_eg2['scale_x_mean'],
+                                                               'x_std'                :hyp_eg2['scale_x_std'],
+                                                               'energy_mean'          :hyp_eg2['scale_y_mean'],
+                                                               'energy_std'           :hyp_eg2['scale_y_std'],
+                                                              },
+                                    'normalization_mode'    : hyp_eg2['normalization_mode'],
+                                    'loss_weights'          : hyp_eg2['loss_weights'],
+                                    'learning_rate'         : hyp_eg2['learning_rate'],
+                                    'initialize_weights'    : hyp_eg2['initialize_weights'],
                                     'val_disjoint'          : hyp_eg2['val_disjoint'],
                                     'val_split'             : hyp_eg2['val_split'],
                                     'epo'                   : hyp_eg2['epo'],
-                                    'epomin'                : hyp_eg2['epomin'],
-                                    'patience'              : hyp_eg2['patience'],
-                                    'max_time'              : hyp_eg2['max_time'],
                                     'batch_size'            : hyp_eg2['batch_size'],
-                                    'delta_loss'            : hyp_eg2['delta_loss'],
-                                    'factor_lr'             : hyp_eg2['factor_lr'],
                                     'epostep'               : hyp_eg2['epostep'],
-                                    'learning_rate_start'   : hyp_eg2['learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_eg2['learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_eg2['learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_eg2['epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,
+                                    'step_callback'         : {
+                                                               'use'                  : hyp_eg2['use_step_callback'],
+                                                               'epoch_step_reduction' : hyp_eg2['epoch_step_reduction'],
+                                                               'learning_rate_step'   : hyp_eg2['learning_rate_step'],
+                                                              },
+                                    'linear_callback'       : {
+                                                               'use'                  : hyp_eg2['use_linear_callback'],
+                                                               'learning_rate_start'  : hyp_eg2['learning_rate_start'],
+                                                               'learning_rate_stop'   : hyp_eg2['learning_rate_stop' ],
+                                                               'epomin'               : hyp_eg2['epomin'],
+                                                              },
+       	       	       	       	    'early_callback'        : {
+                                                               'use'                  : hyp_eg2['use_early_callback'],
+                                                               'epomin'               : hyp_eg2['epomin'],
+                                                               'patience'             : hyp_eg2['patience'],
+                                                               'max_time'             : hyp_eg2['max_time'],
+                                                               'delta_loss'           : hyp_eg2['delta_loss'],
+                                                               'loss_monitor'         : hyp_eg2['loss_monitor'],
+                                                               'factor_lr'            : hyp_eg2['factor_lr'],
+                                                               'learning_rate_start'  : hyp_eg2['learning_rate_start'],
+                                                               'learning_rate_stop'   : hyp_eg2['learning_rate_stop' ],
+                                                              },
+       	       	       	       	    'exp_callback'          : {
+                                                               'use'                  : hyp_eg2['use_exp_callback'],
+                                                               'epomin'               : hyp_eg2['epomin'],
+                                                               'factor_lr'            : hyp_eg2['factor_lr'],
+                                                              },
        	       	                    },
-       	       	      'retraining' :{
-                                    'reinit_weights'        : hyp_eg2['t_reinit_weights'],
-                                    'val_disjoint'          : hyp_eg2['t_val_disjoint'],
-                                    'val_split'             : hyp_eg2['t_val_split'],
-                                    'epo'                   : hyp_eg2['t_epo'],
-                                    'epomin'                : hyp_eg2['t_epomin'],
-                                    'patience'              : hyp_eg2['t_patience'],
-                                    'max_time'              : hyp_eg2['t_max_time'],
-                                    'batch_size'            : hyp_eg2['t_batch_size'],
-                                    'delta_loss'            : hyp_eg2['t_delta_loss'],
-                                    'factor_lr'             : hyp_eg2['t_factor_lr'],
-                                    'epostep'               : hyp_eg2['t_epostep'],
-                                    'learning_rate_start'   : hyp_eg2['t_learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_eg2['t_learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_eg2['t_learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_eg2['t_epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,
-       	       	                    },
-                      'resample'   :{
-                                    'reinit_weights'        : hyp_eg2['a_reinit_weights'],
-                                    'val_disjoint'          : hyp_eg2['a_val_disjoint'],
-                                    'val_split'             : hyp_eg2['a_val_split'],
-                                    'epo'                   : hyp_eg2['a_epo'],
-                                    'epomin'                : hyp_eg2['a_epomin'],
-                                    'patience'              : hyp_eg2['a_patience'],
-                                    'max_time'              : hyp_eg2['a_max_time'],
-                                    'batch_size'            : hyp_eg2['a_batch_size'],
-                                    'delta_loss'            : hyp_eg2['a_delta_loss'],
-                                    'factor_lr'             : hyp_eg2['a_factor_lr'],
-                                    'epostep'               : hyp_eg2['a_epostep'],
-                                    'learning_rate_start'   : hyp_eg2['a_learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_eg2['a_learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_eg2['a_learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_eg2['a_epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,
+       	       	      'plots'      :{
+                                    'unit_energy'           : hyp_eg2['unit'][0],
+       	       	       	       	    'unit_gradient'         : hyp_eg2['unit'][1],
        	       	                    },
                       }
+
         hyp_dict_nac2={
                       'general'    :{
                                     'model_type'            : hyp_nac2['model_type'],
                                     },
                       'model'      :{
                                     'atoms'                 : data['natom'],
-                                    'states'                : data['npair'], 
-                                    'Depth'                 : hyp_nac2['Depth'],
+                                    'states'                : data['nstate'], 
                                     'nn_size'               : hyp_nac2['nn_size'],
-                                    'use_invdist'           : True,
-                                    'invd_mean'             : data['mean_invr'],
-                                    'invd_std'              : data['std_invr'],
-                                    'use_bond_angles'       : False,
-                                    'angle_index'           : [],
-                                    'angle_mean'            : 2,   
-                                    'angle_std'             : 0.2,  
-                                    'use_dihyd_angles'      : False,
-                                    'dihyd_index'           : [],
-                                    'dihyd_mean'            : -1,
-                                    'dihyd_std'             : 2,
-                                    'activ'                 : hyp_nac2['activ'],
-                                    'activ_alpha'           : hyp_nac2['activ_alpha'],
+                                    'depth'                 : hyp_nac2['depth'],
+                                    'activ'                 : {
+                                                               'class_name' : hyp_nac2['activ'],
+                                                               'config'     : {
+                                                                               'alpha' : hyp_nac2['activ_alpha'],
+                                                                              },
+                                                              },
                                     'use_dropout'           : hyp_nac2['use_dropout'],
                                     'dropout'               : hyp_nac2['dropout'],
-                                    'use_reg_activ'         : hyp_nac2['use_reg_activ'],
-                                    'use_reg_weight'        : hyp_nac2['use_reg_weight'],
-                                    'use_reg_bias'          : hyp_nac2['use_reg_bias'],
-                                    'reg_l1'                : hyp_nac2['reg_l1'],
-                                    'reg_l2'                : hyp_nac2['reg_l2'],
-                                    'y_nac_mean'            : 0,                  # data['mean_nac'],
-                                    'y_nac_std'             : 1,                  # data['std_nac']
-                                    'y_nac_unit_conv'       : 1/0.52917721090380, # conversion 1/Bohr to 1/A after scaling!!
-                                    'phase_less_loss'       : hyp_nac2['phase_less_loss'],
+                                    'use_reg_activ'         : hyp_nac2['use_reg_activ_dict'],
+                                    'use_reg_weight'        : hyp_nac2['use_reg_weight_dict'], 
+                                    'use_reg_bias'          : hyp_nac2['use_reg_bias_dict'],
+                                    'invd_index'            : True,
+                                    'angle_index'           : [],
+                                    'dihyd_index'           : [],
                                     },
        	       	      'training'   :{
-                                    'phase_less_loss'       : hyp_nac2['phase_less_loss'],
-                                    'reinit_weights'        : hyp_nac2['reinit_weights'],
+                                    'auto_scaling'          : {
+                                                               'x_mean'               :hyp_nac2['scale_x_mean'],
+                                                               'x_std'                :hyp_nac2['scale_x_std'],
+                                                               'nac_mean'             :hyp_nac2['scale_y_mean'],
+                                                               'nac_std'              :hyp_nac2['scale_y_std'],
+                                                              },
+                                    'normalization_mode'    : hyp_nac2['normalization_mode'],
+                                    'learning_rate'         : hyp_nac2['learning_rate'],
+                                    'phase_less_loss'  	    : hyp_nac2['phase_less_loss'],
+                                    'initialize_weights'    : hyp_nac2['initialize_weights'],
                                     'val_disjoint'          : hyp_nac2['val_disjoint'],
                                     'val_split'             : hyp_nac2['val_split'],
                                     'epo'                   : hyp_nac2['epo'],
                                     'pre_epo'               : hyp_nac2['pre_epo'],
-                                    'epomin'                : hyp_nac2['epomin'],
-                                    'patience'              : hyp_nac2['patience'],
-                                    'max_time'              : hyp_nac2['max_time'],
                                     'batch_size'            : hyp_nac2['batch_size'],
-                                    'delta_loss'            : hyp_nac2['delta_loss'],
-                                    'factor_lr'             : hyp_nac2['factor_lr'],
                                     'epostep'               : hyp_nac2['epostep'],
-                                    'learning_rate_start'   : hyp_nac2['learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_nac2['learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_nac2['learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_nac2['epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,
+                                    'step_callback'         : {'use'                  : hyp_nac2['use_step_callback'],
+                                                               'epoch_step_reduction' : hyp_nac2['epoch_step_reduction'],
+                                                               'learning_rate_step'   : hyp_nac2['learning_rate_step'],
+                                                              },
+                                    'linear_callback'       : {
+                                                               'use'                  : hyp_nac2['use_linear_callback'],
+                                                               'learning_rate_start'  : hyp_nac2['learning_rate_start'],
+                                                               'learning_rate_stop'   : hyp_nac2['learning_rate_stop' ],
+                                                               'epomin'               : hyp_nac2['epomin'],
+                                                              },
+       	       	       	       	    'early_callback'        : {
+                                                               'use'                  : hyp_nac2['use_early_callback'],
+                                                               'epomin'               : hyp_nac2['epomin'],
+                                                               'patience'             : hyp_nac2['patience'],
+                                                               'max_time'             : hyp_nac2['max_time'],
+                                                               'delta_loss'           : hyp_nac2['delta_loss'],
+                                                               'loss_monitor'         : hyp_nac2['loss_monitor'],
+                                                               'factor_lr'            : hyp_nac2['factor_lr'],
+                                                               'learning_rate_start'  : hyp_nac2['learning_rate_start'],
+                                                               'learning_rate_stop'   : hyp_nac2['learning_rate_stop' ],
+                                                              },
+       	       	       	       	    'exp_callback'          : {
+                                                               'use'                  : hyp_nac2['use_exp_callback'],
+                                                               'epomin'               : hyp_nac2['epomin'],
+                                                               'factor_lr'            : hyp_nac2['factor_lr'],
+                                                              },
        	       	                    },
-       	       	      'retraining' :{
-                                    'phase_less_loss'       : hyp_nac2['phase_less_loss'],
-                                    'reinit_weights'        : hyp_nac2['t_reinit_weights'],
-                                    'val_disjoint'          : hyp_nac2['t_val_disjoint'],
-                                    'val_split'             : hyp_nac2['t_val_split'],
-                                    'epo'                   : hyp_nac2['t_epo'],
-                                    'pre_epo'               : hyp_nac2['t_pre_epo'],
-                                    'epomin'                : hyp_nac2['t_epomin'],
-                                    'patience'              : hyp_nac2['t_patience'],
-                                    'max_time'              : hyp_nac2['t_max_time'],
-                                    'batch_size'            : hyp_nac2['t_batch_size'],
-                                    'delta_loss'            : hyp_nac2['t_delta_loss'],
-                                    'factor_lr'             : hyp_nac2['t_factor_lr'],
-                                    'epostep'               : hyp_nac2['t_epostep'],
-                                    'learning_rate_start'   : hyp_nac2['t_learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_nac2['t_learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_nac2['t_learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_nac2['t_epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True,            
-       	       	                    },
-                      'resample'   :{
-                                    'phase_less_loss'       : hyp_nac2['phase_less_loss'],
-                                    'reinit_weights'        : hyp_nac2['a_reinit_weights'],
-                                    'val_disjoint'          : hyp_nac2['a_val_disjoint'],
-                                    'val_split'             : hyp_nac2['a_val_split'],
-                                    'epo'                   : hyp_nac2['a_epo'],
-                                    'pre_epo'               : hyp_nac2['a_pre_epo'],
-                                    'epomin'                : hyp_nac2['a_epomin'],
-                                    'patience'              : hyp_nac2['a_patience'],
-                                    'max_time'              : hyp_nac2['a_max_time'],
-                                    'batch_size'            : hyp_nac2['a_batch_size'],
-                                    'delta_loss'            : hyp_nac2['a_delta_loss'],
-                                    'factor_lr'             : hyp_nac2['a_factor_lr'],
-                                    'epostep'               : hyp_nac2['a_epostep'],
-                                    'learning_rate_start'   : hyp_nac2['a_learning_rate_start'],
-                                    'learning_rate_stop'    : hyp_nac2['a_learning_rate_stop' ],
-                                    'learning_rate_step'    : hyp_nac2['a_learning_rate_step'],
-                                    'epoch_step_reduction'  : hyp_nac2['a_epoch_step_reduction'],
-                                    'use_linear_callback'   : False,
-                                    'use_early_callback'    : False,
-                                    'use_exp_callback'      : False,
-                                    'use_step_callback'     : True, 	
+       	       	      'plots'      :{
+                                    'unit_nac'              : hyp_nac2['unit'],
        	       	                    },
                       }
 
+        hyp_dict_eg['retraining']   = hyp_dict_eg['training']
+        hyp_dict_eg2['retraining']  = hyp_dict_eg2['training']
+        hyp_dict_nac['retraining']  = hyp_dict_nac['training']
+        hyp_dict_nac2['retraining'] = hyp_dict_nac2['training']
+
+        hyp_dict_eg['retraining']['initialize_weights']   = False
+        hyp_dict_eg2['retraining']['initialize_weights']  = False
+        hyp_dict_nac['retraining']['initialize_weights']  = False
+        hyp_dict_nac2['retraining']['initialize_weights'] = False
+
         ## prepare training data
+        self.natom      = data['natom']
+        self.nstate     = data['nstate']
         self.version    = variables_all['version']
         self.ncpu       = variables_all['control']['ml_ncpu']
         self.pred_data  = variables['pred_data']
         self.train_mode = variables['train_mode']
         self.shuffle    = variables['shuffle']
+        self.eg_unit    = variables['eg_unit']
+        self.nac_unit   = variables['nac_unit']
 
+        ## retraining has some bug at the moment, do not use
         if self.train_mode not in ['training','retraining','resample']:
             self.train_mode = 'training'
 
@@ -457,29 +408,52 @@ class DNN:
             self.name   = f"NN-{title}-{id}"
         self.silent     = variables['silent']
         self.x          = data['xyz'][:,:,1:].astype(float)
-        self.y_dict     ={
-        'energy_gradient' :[data['energy'],data['gradient']],
-        'nac'             : data['nac'],
-        }
+
+        ## convert unit of energy and force. au or si. data are in au.
+        if self.eg_unit == 'si':
+            self.H_to_eV        = 27.21138624598853
+            self.H_Bohr_to_eV_A = 27.21138624598853/0.52917721090380
+            self.keep_eV        = 1
+            self.keep_eVA       = 1
+        else:
+            self.H_to_eV        = 1
+            self.H_Bohr_to_eV_A = 1
+       	    self.keep_eV       	= 27.21138624598853
+       	    self.keep_eVA      	= 27.21138624598853/0.52917721090380
+
+        if   self.nac_unit == 'si':
+            self.Bohr_to_A  = 0.52917721090380/27.21138624598853 # convert to eV/A
+            self.keep_A     = 1
+        elif self.nac_unit == 'au':
+            self.Bohr_to_A  = 1                                  # convert to Eh/B
+            self.keep_A     = 0.52917721090380/27.21138624598853
+        elif self.nac_unit == 'eha':
+            self.Bohr_to_A  = 0.52917721090380                   # convert to Eh/A
+            self.keep_A     = 1/27.21138624598853
+
+        ## combine y_dict
+        self.y_dict = {}
+        if nn_eg_type > 0:
+            self.y_dict['energy_gradient'] = [data['energy']*self.H_to_eV,data['gradient']*self.H_Bohr_to_eV_A]
+        if nn_nac_type > 0:
+            self.y_dict['nac'] = data['nac']/self.Bohr_to_A
 
         ## combine hypers
-        self.hyper ={
-        'energy_gradient' : None,
-        'nac'             : None,
-        }
-
-        if nn_eg_type == 1:  # same architecture with different weight
-            self.hyper['energy_gradient']=hyp_dict_eg
+        self.hyper = {}
+        if   nn_eg_type == 1:  # same architecture with different weight
+            self.hyper['energy_gradient']  = hyp_dict_eg
         else:
        	    self.hyper['energy_gradient']=[hyp_dict_eg,hyp_dict_eg2]
-
-        if nn_nac_type == 1: # same architecture with different weight
+        if   nn_nac_type == 1: # same architecture with different weight
        	    self.hyper['nac']=hyp_dict_nac
-       	else:
+       	elif nn_nac_type >  1:
             self.hyper['nac']=hyp_dict_nac=[hyp_dict_nac,hyp_dict_nac2]
 
         ## initialize model
-        self.model	= NeuralNetPes(self.name)
+        if   modeldir == None:
+            self.model = NeuralNetPes(self.name)
+        else:
+            self.model = NeuralNetPes(modeldir)
 
     def _heading(self):
 
@@ -509,9 +483,7 @@ class DNN:
 
         start=time.time()
 
-        self.model.create({'energy_gradient':self.hyper['energy_gradient'],
-                           'nac'            :self.hyper['nac'],
-                           })
+        self.model.create(self.hyper)
 
         topline='Neural Networks Start: %20s\n%s' % (self._whatistime(),self._heading())
         runinfo="""\n  &nn fitting \n"""
@@ -529,25 +501,24 @@ class DNN:
             out_index,out_errr,out_fiterr,out_testerr=self.model.resample(self.x,self.y_dict,gpu_dist={},proc_async=self.ncpu>=4)
         else:
             ferr=self.model.fit(self.x,self.y_dict,gpu_dist={},proc_async=self.ncpu>=4,fitmode=self.train_mode,random_shuffle=self.shuffle)
-
+            print(ferr)
             #self.model.save()
             err_eg1=ferr['energy_gradient'][0]
             err_eg2=ferr['energy_gradient'][1]
-            err_n=ferr['nac']
-
-            H_to_eV=27.21138624598853
-            H_Bohr_to_eV_A=27.21138624598853/0.52917721090380
-            Bohr_to_A=1/0.52917721090380
+            if 'nac' in ferr.keys():
+                err_n=ferr['nac']
+            else:
+                err_n=np.zeros(2)
 
             train_info="""
   &nn validation mean absolute error
 -------------------------------------------------------
-      energy       gradient       nac
-        eV           eV/A         1/A
+      energy       gradient       nac(interstate)
+        eV           eV/A         eV/A
   %12.8f %12.8f %12.8f
   %12.8f %12.8f %12.8f
 
-""" % (err_eg1[0]*H_to_eV, err_eg1[1]*H_Bohr_to_eV_A, err_n[0]*Bohr_to_A ,err_eg2[0]*H_to_eV, err_eg2[1]*H_Bohr_to_eV_A, err_n[1]*Bohr_to_A)
+""" % (err_eg1[0]*self.keep_eV, err_eg1[1]*self.keep_eVA, err_n[0]/self.keep_A ,err_eg2[0]*self.keep_eV, err_eg2[1]*self.keep_eVA, err_n[1]/self.keep_A)
 
         end=time.time()
         walltime=self._howlong(start,end)
@@ -585,31 +556,30 @@ class DNN:
             pred_natom,pred_nstate,pred_xyz,pred_invr,pred_energy,pred_gradient,pred_nac,pred_ci,pred_mo=pred
             x=np.array(pred_xyz)[:,:,1:].astype(float)
             y_pred,y_std=self.model.predict(x)
-            compare=1
+            entry=len(x)
         else:
             atoms=len(x)
             x=np.array(x)[:,1:4].reshape([1,atoms,3]).astype(float)
             y_pred,y_std=self.model.call(x)
-            compare=0
+            entry=1
 
+        e_pred=y_pred['energy_gradient'][0]/self.H_to_eV
+        g_pred=y_pred['energy_gradient'][1]/self.H_Bohr_to_eV_A
+        e_std=y_std['energy_gradient'][0]/self.H_to_eV 
+        g_std=y_std['energy_gradient'][1]/self.H_Bohr_to_eV_A
+        if 'nac' in y_pred.keys():
+            n_pred=y_pred['nac']*self.Bohr_to_A
+            n_std=y_std['nac']*self.Bohr_to_A
+        else:
+            n_pred=np.zeros([entry,int(self.nstate*(self.nstate-1)/2),self.natom,3])
+            n_std=np.zeros([entry,int(self.nstate*(self.nstate-1)/2),self.natom,3])
 
-        ## NN uses eV and eV/A, but MD uses Hartree and Hartree/Bohr
-        H_to_eV=27.21138624598853
-        H_Bohr_to_eV_A=27.21138624598853/0.52917721090380
-
-        e_pred=y_pred['energy_gradient'][0]#/H_to_eV
-        g_pred=y_pred['energy_gradient'][1]#/H_Bohr_to_eV_A
-        n_pred=y_pred['nac']
-        e_std=y_std['energy_gradient'][0]  #/H_to_eV 
-        g_std=y_std['energy_gradient'][1]  #/H_Bohr_to_eV_A
-        n_std=y_std['nac']
-
-        if compare == 1:
+        if entry > 1 and self.silent == 0:
             de=np.abs(np.array(pred_energy)   - e_pred)
             dg=np.abs(np.array(pred_gradient) - g_pred)
             dn=np.abs(np.array(pred_nac)      - n_pred)
             for i in range(len(x)):
-                print('%5s: %8.4f %8.4f %8.4f %8.4f %8.4f' % (i+1,de[i][0],de[i][1],np.amax(dg[i][0]),np.amax(dg[i][1]),np.amax(dn[i])))
+                print('%5s: %s %s %s' % (i+1,' '.join(['%8.4f' % (x) for x in de[i]]),' '.join(['%8.4f' % (np.amax(x)) for x in dg[i]]),' '.join(['%8.4f' % (np.amax(x)) for x in dn[i]])))
 
         ## Here I will need some function to print/save output
         length=len(x)

@@ -10,9 +10,49 @@ from tools import Readcoord,Printcoord,Checkpoint,Readinitcond
 from entrance import ReadInput,StartInfo
 from methods import QM
 from aimd import AIMD
+from hybrid import MIXAIMD
 from dynamixsampling import Sampling
 from adaptive_sampling import AdaptiveSampling
 
+def logo(version):
+
+    credits="""
+  --------------------------------------------------------------
+                               *
+                              /+\\
+                             /+++\\
+                            /+++++\\
+                           /PyRAIMD\\
+                          /+++++++++\\
+                         *===========*
+
+                          Python Rapid
+                     Artificial Intelligence
+                  Ab Initio Molecular Dynamics
+
+                      Developer @Jingbai Li
+                  Northeastern University, USA
+
+                          version:   %s
+
+
+  With contriutions from (in alphabetic order):
+    Andre Eberhard	       - Gaussian process regression
+    Jingbai Li/Daniel Susman   - Zhu-Nakamura surface hopping
+    Jingbai Li                 - Fewest switches surface hopping
+                                 Velocity verlet
+                                 Interface to OpenMolcas/BAGEL
+                                 Adaptive sampling (with enforcement)
+                                 QC/ML non-adiabatic molecular dynamics
+    Patrick Reiser	       - Neural networks (pyNNsMD)
+
+  Special acknowledgement to:
+    Steven A. Lopez	       - Project directorship
+    Pascal Friederich          - ML directoriship
+
+""" % (version)
+
+    return credits
 
 class PYRAIMD:
 
@@ -30,38 +70,11 @@ class PYRAIMD:
         ## y: str
         ##    Input information
 
-        info="""
--------------------------------------------------------
-
-                           *
-                          /+\\
-                         /+++\\
-                        /+++++\\
-                       /PyRAIMD\\
-                      /+++++++++\\
-                     *===========*
-
-                      Python Rapid
-                 Artificial Intelligence
-              Ab Initio Molecular Dynamics
-
-                   Developer@Jingbai Li
-               Northeastern University, USA
-
-                      version:   %s
-
-
-  With contributions from(in alphabetic order):
-    Andre Eberhard	 - Gaussian process regression
-    Patrick Reiser	 - Neural networks
-
-  Special acknowledgement to:
-    Steven A. Lopez	 - Project directorship
-    Pascal Friederich    - ML directorship
+        info="""%s
 
 %s
 
-""" % (x,y)
+""" % (logo(x),y)
         return info
 
     def _machine_learning(self):
@@ -107,6 +120,40 @@ class PYRAIMD:
         traj=AIMD(self.variables_all,QM=method,id=None,dir=None)
         traj.run(xyz,velo)
 
+    def _hybrid_dynamics(self):
+        title    = self.variables_all['control']['title']
+        qm	 = self.variables_all['control']['qm']
+        abinit   = self.variables_all['control']['abinit']
+        md	 = self.variables_all['md']
+        initcond = md['initcond']
+        nesmb    = md['nesmb']
+        method   = md['method']
+        format   = md['format']
+        gl_seed  = md['gl_seed']
+        temp     = md['temp']
+        if initcond == 0:
+            ## load initial condition from .xyz and .velo
+            xyz,M=Readcoord(title)
+            velo=np.loadtxt('%s.velo' % (title))
+        else:
+            ## use sampling method to generate intial condition
+            trvm=Sampling(title,nesmb,gl_seed,temp,method,format)[-1]
+            xyz,mass,velo=Readinitcond(trvm)
+            ## save sampled geometry and velocity
+            initxyz_info='%d\n%s\n%s' % (len(xyz),'%s sampled geom %s at %s K' % (method,nesmb,temp),Printcoord(xyz))
+            initxyz=open('%s.xyz' % (title),'w')
+            initxyz.write(initxyz_info)
+            initxyz.close()
+            initvelo=open('%s.velo' % (title),'w')
+            np.savetxt(initvelo,velo,fmt='%30s%30s%30s')
+            initvelo.close()
+        ref=QM(abinit,self.variables_all,id=None)
+        ref.load()
+        method=QM(qm,self.variables_all,id=None)
+        method.load()
+        traj=MIXAIMD(self.variables_all,QM=method,REF=ref,id=None,dir=None)
+        traj.run(xyz,velo)
+
     def	_active_search(self):
         sampling=AdaptiveSampling(self.variables_all)
         sampling.search()
@@ -115,6 +162,7 @@ class PYRAIMD:
         jobtype = self.variables_all['control']['jobtype']
         job_func={
         'md'         : self._dynamics,
+        'hybrid'     : self._hybrid_dynamics,
         'adaptive'   : self._active_search,
         'train'      : self._machine_learning,
         'prediction' : self._machine_learning,
@@ -126,42 +174,17 @@ class PYRAIMD:
 
 if __name__ == '__main__':
 
-    version = 0.5
-    usage="""
-  --------------------------------------------------------------
-                               *
-                              /+\\
-                             /+++\\
-                            /+++++\\
-                           /PyRAIMD\\
-                          /+++++++++\\
-                         *===========*
-
-                          Python Rapid
-                     Artificial Intelligence
-                  Ab Initio Molecular Dynamics
-
-                       Developer@Jingbai Li
-                   Northeastern University, USA
-
-                          version:   %s
-
-
-  With contriutions from(in alphabetic order):
-    Andre Eberhard	 - Gaussian process regression
-    Patrick Reiser	 - Neural networks
-
-  Special acknowledgement to:
-    Steven A. Lopez	 - Project directorship
-    Pascal Friederich    - ML directoriship
+    version = '0.8'
+    usage="""%s
 
   Usage:
       python3 PyRAIMD.py input
 
-""" % (version)
+""" % (logo(version))
 
     if len(sys.argv) < 2:
         print(usage)
     else:
+        os.environ['PYTHONPATH'] = os.environ['PYRAIMD']
         pmd=PYRAIMD(sys.argv[1],version)
         pmd.run()
