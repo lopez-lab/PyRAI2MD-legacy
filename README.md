@@ -24,7 +24,7 @@ Python Rapid Artificial Intelligence Ab Initio Molecular Dynamics
     Andre Eberhard	           - Gaussian process regression
     Jingbai Li/Daniel Susman   - Zhu-Nakamura surface hopping
     Jingbai Li                 - Fewest switches surface hopping
-                                 Velocity verlet
+                                 Velocity Verlet
                                  Interface to OpenMolcas/BAGEL
                                  Adaptive sampling (with enforcement)
                                  QC/ML non-adiabatic molecular dynamics
