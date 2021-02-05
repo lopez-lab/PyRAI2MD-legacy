@@ -31,7 +31,9 @@ class BAGEL:
         self.use_hpc        = variables['use_hpc']
 
         if id != None:
-            self.workdir    = '%s-%s' % (self.workdir,id)
+            self.workdir    = '%s/tmp_BAGEL-%s' % (self.workdir,id)
+        else:
+            self.workdir    = '%s/tmp_BAGEL' % (self.workdir)
 
         ## set environment variables
         os.environ['BAGEL_PROJECT']       = self.project   # the input name is fixed!
@@ -86,8 +88,7 @@ export PATH=$MPI/bin:$PATH
 source %s %s
 
 cd $BAGEL_WORKDIR
-%s/bin/BAGEL %s/%s.json > %s/%s.log
-        """ % (self.project,\
+""" % (self.project,\
                self.bagel,\
                self.blas,\
                self.lapack,\
@@ -100,12 +101,12 @@ cd $BAGEL_WORKDIR
                self.mkl,\
                self.arch)
 
-        if self.run_mpi == 1:
+        if self.use_mpi == 0:
             submission+='%s/bin/BAGEL %s/%s.json > %s/%s.log\n' % (self.bagel,self.workdir,self.project,self.workdir,self.project)
         else:
             submission+='mpirun -np %s %s/bin/BAGEL %s/%s.json > %s/%s.log\n' % (self.nproc,self.bagel,self.workdir,self.project,self.workdir,self.project)
 
-        with open('%s/%s.sbatch' % (sefl.workdir,self.project),'w') as out:
+        with open('%s/%s.sbatch' % (self.workdir,self.project),'w') as out:
             out.write(submission)
 
     def _setup_bagel(self,x):
@@ -148,10 +149,10 @@ cd $BAGEL_WORKDIR
     def _run_bagel(self):
         maindir=os.getcwd()
         os.chdir(self.workdir)
-        if use_hpc == 1:
-            subprocess.run('sbatch -W %s/%s.sbtach' % (self.workdir,self.project),shell=True)
+        if self.use_hpc == 1:
+            subprocess.run('sbatch -W %s/%s.sbatch' % (self.workdir,self.project),shell=True)
         else:
-            if use_mpi == 1:
+            if self.use_mpi == 1:
                 subprocess.run('source %s %s;mpirun -np %s %s/bin/BAGEL %s/%s.json > %s/%s.log' % (self.mkl,self.arch,self.nproc,self.bagel,self.workdir,self.project,self.workdir,self.project),shell=True)
             else:
                 subprocess.run('source %s %s;%s/bin/BAGEL %s/%s.json > %s/%s.log' % (self.mkl,self.arch,self.bagel,self.workdir,self.project,self.workdir,self.project),shell=True)
@@ -185,7 +186,7 @@ cd $BAGEL_WORKDIR
                     coupling.append(cp)
             nac  = np.array(coupling) 
         else:
-            nac  = np.zeros([int(self.ci*(self.ci-1)/2),self.natom,3])
+            nac  = np.zeros([1,self.natom,3])
 
         civec    = np.zeros(0)
         movec    = np.zeros(0)

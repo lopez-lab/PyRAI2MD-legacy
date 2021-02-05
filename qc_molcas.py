@@ -107,7 +107,7 @@ mkdir -p $MOLCAS_WORKDIR/$MOLCAS_PROJECT
 cd $WORKDIR
 $MOLCAS/bin/pymolcas -f $INPUT.inp -b 1
 rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
-        """ % (self.project,\
+""" % (self.project,\
                self.calcdir,\
                self.molcas_nproc,\
                self.molcas_mem,\
@@ -185,7 +185,7 @@ rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
         movec    = np.array(movec).reshape([active,norb])
 
         if self.read_nac != 1:
-            nac  = np.zeros([int(self.ci*(self.ci-1)/2),self.natom,3])
+            nac  = np.zeros([1,self.natom,3])
 
         return energy,gradient,nac,civec,movec
 

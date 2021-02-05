@@ -383,13 +383,14 @@ class AdaptiveSampling:
         for p in pop:
             if len(p) >= self.pop_step:
                 average_pop.append(p[0:self.pop_step])
-        average_pop=np.mean(average_pop,axis=0)
-        pop_info=''
-        for n,p in enumerate(average_pop):
-            pop_info+='%-5s%s\n'% (n,' '.join(['%24.16f ' % (x) for x in p]))
-        mdpop=open('%s/%s-%s.pop' % (logpath,self.title,self.iter),'w')
-        mdpop.write(pop_info)
-        mdpop.close()
+        if len(average_pop) > 0:
+            average_pop=np.mean(average_pop,axis=0)
+            pop_info=''
+            for n,p in enumerate(average_pop):
+                pop_info+='%-5s%s\n'% (n,' '.join(['%24.16f ' % (x) for x in p]))
+            mdpop=open('%s/%s-%s.pop' % (logpath,self.title,self.iter),'w')
+            mdpop.write(pop_info)
+            mdpop.close()
 
         #savethis={self.iter:checkpoint_dict} ## This saves too much !!
         savethis={
