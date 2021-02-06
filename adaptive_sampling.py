@@ -126,7 +126,7 @@ class AdaptiveSampling:
         for i in qc_results:
             if   self.read_nac == 1 and len(i[1]) == self.ci and len(i[2]) == self.ci and len(i[3]) == self.ci*(self.ci-1)/2:
                 results.append(i)
-            elif self.read_nac == 1 and len(i[1]) == self.ci and len(i[2]) == self.ci:
+            elif self.read_nac == 0 and len(i[1]) == self.ci and len(i[2]) == self.ci:
                 results.append(i)
 
         return results
