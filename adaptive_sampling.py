@@ -53,6 +53,10 @@ class AdaptiveSampling:
         'neighbor'     : control['neighbor'],
         }
 
+       	## variables for checking QC results
+       	self.ci	       	  = md['ci']
+       	self.read_nac     = variables_all[self.abinit]['read_nac']
+
         ## trajectories properties
         self.iter         = 0                            # number of search iteration
         self.ntraj        = nesmb                        # number of trajectories
@@ -120,7 +124,9 @@ class AdaptiveSampling:
         ## check qc results and exclude non-converged ones
         results=[]
         for i in qc_results:
-            if len(i[2]) > 0 and len(i[3]) > 0:
+            if   self.read_nac == 1 and len(i[1]) == self.ci and len(i[2]) == self.ci and len(i[3]) == self.ci*(self.ci-1)/2:
+                results.append(i)
+            elif self.read_nac == 1 and len(i[1]) == self.ci and len(i[2]) == self.ci:
                 results.append(i)
 
         return results

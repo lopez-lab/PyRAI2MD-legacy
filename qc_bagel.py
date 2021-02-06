@@ -159,19 +159,22 @@ cd $BAGEL_WORKDIR
         os.chdir(maindir)
 
     def _read_bagel(self):
+
         with open('%s/%s.log' % (self.workdir,self.project),'r') as out:
             log  = out.read().splitlines()
-                
-        energy   = np.loadtxt('%s/ENERGY.out' % (self.workdir))[0:self.ci]
+
+        energy   = []
+       	if os.path.exists('%s/ENERGY.out' % (self.workdir)) ==	True:
+            energy   = np.loadtxt('%s/ENERGY.out' % (self.workdir))[0:self.ci]
+        energy   = np.array(energy)
+
         gradient = []
         for i in range(self.ci):
-
-
-            with open('%s/FORCE_%s.out' % (self.workdir,i)) as force:
-                g=force.read().splitlines()[1:self.natom+1]
-                g=S2F(g)
-                gradient.append(g)
-
+            if os.path.exists('%s/FORCE_%s.out' % (self.workdir,i)) == True:
+                with open('%s/FORCE_%s.out' % (self.workdir,i)) as force:
+                    g=force.read().splitlines()[1:self.natom+1]
+                    g=S2F(g)
+                    gradient.append(g)
         gradient = np.array(gradient)
 
         if self.read_nac == 1:
@@ -180,10 +183,11 @@ cd $BAGEL_WORKDIR
             pairs    = NACpairs(self.ci).copy()
             for i in range(npair):
                 pa,pb=pairs[i+1]
-                with open('%s/NACME_%s_%s.out' % (self.workdir,pa-1,pb-1)) as nacme:
-                    cp=nacme.read().splitlines()[1:self.natom+1]
-                    cp=S2F(cp)
-                    coupling.append(cp)
+                if os.path.exists('%s/NACME_%s_%s.out' % (self.workdir,pa-1,pb-1)) == True:
+                    with open('%s/NACME_%s_%s.out' % (self.workdir,pa-1,pb-1)) as nacme:
+                        cp=nacme.read().splitlines()[1:self.natom+1]
+                        cp=S2F(cp)
+                        coupling.append(cp)
             nac  = np.array(coupling) 
         else:
             nac  = np.zeros([1,self.natom,3])
