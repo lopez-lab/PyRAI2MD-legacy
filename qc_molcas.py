@@ -114,7 +114,7 @@ class MOLCAS:
         with open('%s/%s.inp' % (self.calcdir,self.project),'w') as out:
             out.write(si_input)
 
-    def _setup_hpc():
+    def _setup_hpc(self):
         ## setup calculation using HPC
         ## read slurm template from .slurm files
 
