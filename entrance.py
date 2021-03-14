@@ -86,6 +86,8 @@ def read_molcas(keywords,values):
             keywords[key] = int(val[0])
         elif key == 'basis':
             keywords[key] = int(val[0])
+        elif key == 'read_nac':
+            keywords[key] = int(val[0])
         elif key == 'use_hpc':
             keywords[key] = int(val[0])
 
@@ -870,11 +872,14 @@ def StartInfo(variables_all):
   State:                    %-10s
   Keep tmp_molcas:          %-10s
   Track phase:              %-10s
+  Read NAC:                 %-10s
+  Submit jobs:              %-10s
 -------------------------------------------------------
-""" % (variables_molcas['molcas'],          variables_molcas['molcas_nproc'],   variables_molcas['molcas_mem'],     \
-       variables_molcas['molcas_print'],    variables_molcas['molcas_project'], variables_molcas['molcas_workdir'], \
+""" % (variables_molcas['molcas'],          variables_molcas['molcas_nproc'],    variables_molcas['molcas_mem'],     \
+       variables_molcas['molcas_print'],    variables_molcas['molcas_project'],  variables_molcas['molcas_workdir'], \
        variables_molcas['molcas_calcdir'],  variables_molcas['omp_num_threads'], variables_molcas['ci'],\
-       variables_molcas['keep_tmp'],        variables_molcas['track_phase'])
+       variables_molcas['keep_tmp'],        variables_molcas['track_phase'],     variables_molcas['read_nac'],\
+       variables_molcas['use_hpc'])
 
     bagel_info="""
   &bagel
@@ -894,13 +899,14 @@ def StartInfo(variables_all):
   State:                    %-10s
   Keep tmp_bagel:           %-10s
   Read NAC:                 %-10s
+  Submit jobs:              %-10s
 -------------------------------------------------------
 """ % (variables_bagel['bagel'],         variables_bagel['bagel_nproc'],     variables_bagel['bagel_project'],\
        variables_bagel['bagel_workdir'], variables_bagel['bagel_archive'],\
        variables_bagel['mpi'],           variables_bagel['blas'],\
        variables_bagel['lapack'],        variables_bagel['boost'],           variables_bagel['mkl'],\
        variables_bagel['arch'],          variables_bagel['omp_num_threads'], variables_bagel['ci'],\
-       variables_bagel['keep_tmp'],      variables_bagel['read_nac'])
+       variables_bagel['keep_tmp'],      variables_bagel['read_nac'],        variables_bagel['use_hpc'])
 
     info_method={
     'gp'    :   gp_info,
