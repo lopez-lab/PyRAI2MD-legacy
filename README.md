@@ -1,6 +1,9 @@
 # PyRAI<sup>2</sup>MD
 Python Rapid Artificial Intelligence Ab Initio Molecular Dynamics
 
+Citation:
+Jingbai Li, Patrick Reiser, Benjamin R. Boswell, André Eberhard, Noah Z. Burns, Pascal Friederich, and Steven A. Lopez, "Automatic discovery of photoisomerization mechanisms with nanosecond machine learning photodynamics simulations", Chem. Sci. 2021. DOI: 10.1039/D0SC05610C
+
 -------------------------------------------------------
 
                            *
