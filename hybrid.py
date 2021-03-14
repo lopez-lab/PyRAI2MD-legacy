@@ -3,6 +3,7 @@
 
 import time,datetime,os,pickle
 import numpy as np
+from reset_velocity import ResetVelo
 from periodic_table import Element
 from verlet import NoseHoover, VerletI, VerletII
 from surfacehopping import FSSH,GSH,NOSH
@@ -176,6 +177,24 @@ class MIXAIMD:
         self.traj['V'] = VerletII(self.traj)
         if self.timing == 1: print('verlet_2',time.time())
         self.traj['Ekin'] = np.sum(0.5*(self.traj['M']*self.traj['V']**2))
+
+        # reset velocity to avoid flying ice cube
+        # end function early if velocity reset is not requested
+        if self.traj['reset'] != 1:
+            return None
+
+        # end function early if velocity reset step is 0 but iteration is more than 1
+        if self.traj['resetstep'] == 0 and self.traj['iter'] > 1:
+            return None
+
+        # end function early if velocity reset step is not 0 but iteration is not the multiple of it
+        if self.traj['resetstep'] != 0:
+            if self.traj['iter'] % self.traj['resetstep'] != 0:
+                return None
+
+        # finally reset velocity here
+        V_noTR=ResetVelo(self.traj)
+        self.traj['V']=V_noTR
 
     def _compute_properties(self,xyz):
         # update previous-previous and previous potential energies and forces

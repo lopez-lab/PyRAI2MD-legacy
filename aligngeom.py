@@ -1,4 +1,4 @@
-## tools for PyQDynamics
+## Geometry alignment tools for PyRAIMD
 ## Jingbai Li Jun 6 2020
 
 import numpy as np

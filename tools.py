@@ -2,6 +2,7 @@
 ## Jingbai Li Feb 13 2020
 ## Jingbai Li May 15 2020 add readinitcond
 
+import os
 import time,datetime,json
 from periodic_table import Element
 import numpy as np
@@ -93,9 +94,21 @@ def Printcoord(xyz):
     coord=''
     for line in xyz:
         e,x,y,z=line
-        coord+='%-5s%16.8f%16.8f%16.8f\n' % (e,float(x),float(y),float(z))
+        coord+='%-5s%24.16f%24.16f%24.16f\n' % (e,float(x),float(y),float(z))
 
     return coord
+
+def Markatom(xyz,marks,prog):
+    ## This function marks atoms for different basis set specification of Molcas
+
+    new_xyz=[]
+
+    for n,line in enumerate(xyz):
+        e,x,y,z=line
+        e = marks[n].split()[0]
+        new_xyz.append([e,x,y,z])
+
+    return new_xyz
 
 def GetInvR(R):
     ## This functoin convert coordinates to inverse R matrix
@@ -111,6 +124,25 @@ def GetInvR(R):
 
     invr=np.array(invr)
     return invr
+
+def Read_angle_index(var,n):
+    ## This function read angle index from input or a file
+
+    file=var[0]
+    if os.path.exists(file) == True:
+        angle_list=np.loadtxt(file)
+    else:
+        num_angle=int(len(var)/n)
+        tot_index=int(num_angle*n)
+        angle_list=np.array(var[0:tot_index]).reshape([num_angle,n]).astype(int)
+
+    if angle_list.shape[1] != n:
+        print('The angle index file does not match the target angle')
+        exit()
+
+    angle_list+=1 # shift index starting from 0
+
+    return angle_list.tolist()
 
 def Checkpoint(traj):
     ## obsolete
@@ -234,3 +266,75 @@ def Checkpoint(traj):
 #    with open('%s/%s.chk.json' % (logpath,title),'w') as chk_file:
 #        json.dump(Chk,chk_file)
 
+def PermuteMap(x,y_dict,permute_map,seed):
+    ## This function permute data following the map P.
+    ## x is M x N x 3, M entries, N atoms, x,y,z
+    ## y_dict has possible two keys 'energy_gradient' and 'nac'
+    ## energy is M x n, M entries, n states
+    ## gradient is M x n x N x 3, M entries, n states, N atoms, x,y,z
+    ## nac is M x m x N x 3, M entries, m state pairs, N atoms, x,y,z
+    ## permute_map is a file including all permutation
+    ## seed controls the random shuffle the premutated data
+
+    # early stop the function
+    if permute_map == 'No':
+        return x, y_dict
+    if permute_map != 'No' and os.path.exists(permute_map) == False:
+       	return x, y_dict
+
+    # load permutation map
+    P = np.loadtxt(permute_map)-1
+    P = P.astype(int)
+    if len(P.shape) == 1:
+        P = P.reshape([1,-1])
+
+    x_new=np.copy(x)
+    y_dict_new=y_dict.copy()
+
+    per_eg = 0
+    per_nac = 0
+
+    if 'energy_gradient' in y_dict.keys(): # check energy gradient
+        energy = y_dict['energy_gradient'][0]  # pick energy, note permutation does not change energy
+        grad = y_dict['energy_gradient'][1]    # pick gradient
+        per_eg = 1
+
+    if 'nac' in y_dict.keys():                 # check nac
+       	nac = y_dict['nac']    	       	       # pick nac
+        per_nac = 1
+
+    for index in P:
+        # permute coord along N atoms
+        per_x = x[:,index,:]
+
+        # add new coord
+        x_new=np.concatenate([x_new,per_x],axis=0)
+
+        if per_eg == 1:
+            # permute grad along N atoms
+            per_g = grad[:,:,index,:]
+
+            # add new energy gradient
+            y_dict_new['energy_gradient'][0]=np.concatenate([y_dict_new['energy_gradient'][0],energy],axis=0)
+            y_dict_new['energy_gradient'][1]=np.concatenate([y_dict_new['energy_gradient'][1],per_g],axis=0)
+
+        if per_nac == 1:
+            # permute nac along N atoms
+            per_n = nac[:,:,index,:]
+
+            # add new nac
+       	    y_dict_new['nac'][0]=np.concatenate([y_dict_new['nac'],per_nac],axis=0)
+
+    #shuffle the permutated data
+    index=np.arange(len(x_new))
+    np.random.shuffle(index)
+
+    x_new=x_new[index]
+    if 'energy_gradient' in y_dict.keys(): # check energy gradient
+        y_dict_new['energy_gradient'][0]=y_dict_new['energy_gradient'][0][index]
+        y_dict_new['energy_gradient'][1]=y_dict_new['energy_gradient'][1][index]
+    if 'nac' in y_dict.keys():             # check nac
+        y_ditc_new['nac']=y_ditc_new['nac'][index]
+
+    return x_new,y_dict_new
+  

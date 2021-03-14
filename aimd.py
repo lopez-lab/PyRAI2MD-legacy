@@ -4,7 +4,8 @@
 import time,datetime,os,pickle
 import numpy as np
 from periodic_table import Element
-from verlet import NoseHoover, VerletI, VerletII
+from reset_velocity import ResetVelo
+from verlet import NoseHoover, VerletI, VerletII, NVE,NoEnsemble
 from surfacehopping import FSSH,GSH,NOSH
 from tools import Printcoord,NACpairs
 class AIMD:
@@ -86,6 +87,7 @@ class AIMD:
         'old'     : 0,          ## previous state number
         'state'   : 0,	        ## current state number
         'T'       :[],          ## atom list
+        'M'       :np.zeros(0), ## atom mass
         'V'       :np.zeros(0), ## velocity in Bohr/au
         'R'       :np.zeros(0), ## coordinates in angstrom
         'Rp'      :np.zeros(0), ## coordinates in the previous step
@@ -102,6 +104,7 @@ class AIMD:
         'N'       :np.zeros(0), ## non-adiabatic coupling in 1/Bohr
         'Vs'      :np.zeros(0), ## thermostat array
         'iter'    : 0,          ## current iteration
+        'iter_x'  : 0,          ## the last iteration in the excited state 
         'hoped'   : 0,          ## surface hopping type
         'err_e'   : None,       ## error of energy in adaptive sampling
         'err_g'   : None,       ## error of gradient in adaptive sampling
@@ -117,6 +120,7 @@ class AIMD:
         self.skipped       = 0                   ## number of steps skipped
         self.restart       = self.traj['restart']## turn on/off restart function
         self.addstep       = self.traj['addstep']## continue the trajectory with additional steps
+        self.history       = self.traj['history']## length of md_hist
 
         ###### obselete variables
         ## self.output_buffer = []                  ## list of buffered output
@@ -162,6 +166,12 @@ class AIMD:
         self.traj['Ekinpp']= self.traj['Ekinp']
         self.traj['Ekinp'] = self.traj['Ekin']
 
+        # add excess kinetic energy in the first step if requested
+        if self.traj['iter'] == 1 and self.traj['excess'] != 0:
+            K0=np.sum(0.5*(self.traj['M']*self.traj['V']**2))
+            f=((K0+self.traj['excess'])/K0)**0.5
+            self.traj['V']=self.traj['V']*f
+
         # update current coordinates and kinetic energies
         self.traj['R'] = VerletI(self.traj)
         if self.timing == 1: print('verlet',time.time())
@@ -172,6 +182,24 @@ class AIMD:
         self.traj['V'] = VerletII(self.traj)
         if self.timing == 1: print('verlet_2',time.time())
         self.traj['Ekin'] = np.sum(0.5*(self.traj['M']*self.traj['V']**2))
+
+        # reset velocity to avoid flying ice cube
+        # end function early if velocity reset is not requested
+        if self.traj['reset'] != 1:
+            return None
+
+       	# end function early if	velocity reset step is 0 but iteration is more than 1
+        if self.traj['resetstep'] == 0 and self.traj['iter'] > 1:
+            return None
+
+        # end function early if velocity reset step is not 0 but iteration is not the multiple of it 
+        if self.traj['resetstep'] != 0:
+            if self.traj['iter'] % self.traj['resetstep'] != 0:
+                return None
+
+        # finally reset velocity here
+        V_noTR=ResetVelo(self.traj)
+        self.traj['V']=V_noTR
 
     def _compute_properties(self,xyz):
         # update previous-previous and previous potential energies and forces
@@ -198,16 +226,40 @@ class AIMD:
         self.traj['err_g']= results['err_g']
         self.traj['err_n']= results['err_n']
 
+
+        ## record trajectories for further analysis if requested
         if self.record == 1:
-            self.traj['MD_hist'].append([xyz,results['energy'].tolist(),results['gradient'].tolist(),results['nac'].tolist(),\
-                                             results['err_e'],          results['err_g'],            results['err_n']])    # convert all to list
+            self.traj['MD_hist'].append([self.traj['iter'], xyz,results['energy'].tolist(),results['gradient'].tolist(),results['nac'].tolist(),\
+                                                                results['err_e'],          results['err_g'],            results['err_n']])    # convert all to list
+
+            ## keep the lastest steps of trajectories to save memory if the length is longer than requested
+            if len(self.traj['MD_hist']) > self.history:
+                end=len(self.traj['MD_hist'])
+                start=int(end-self.history)
+                self.traj['MD_hist'] = self.traj['MD_hist'][start:end]
 
     def _thermostat(self):
-        if self.traj['thermo'] == 1:
+        if  self.traj['thermo']  == -1:
+            return 0
+        if   self.traj['thermo'] == 0:
+            V,Vs,Ekin = NVE(self.traj)
+        elif self.traj['thermo'] == 1:
             V,Vs,Ekin = NoseHoover(self.traj)
-            self.traj['V'] = V
-            self.traj['Vs'] = Vs
-            self.traj['Ekin'] = Ekin
+
+        ## Haven't tested
+        ## NVE for excited-state, NoseHoover for ground-state after a certain amount of time
+        elif self.traj['thermo'] == 2:
+            if self.traj['state'] > 1:
+                self.traj['iter_x'] = self.traj['iter']
+            delay = self.traj['iter'] - self.traj['iter_x']
+            if   self.traj['state'] == 1 and delay >= self.traj['thermodelay']:
+                V,Vs,Ekin = NoseHoover(self.traj)
+            elif self.traj['state'] != 1:
+                V,Vs,Ekin = NVE(self.traj)
+
+        self.traj['V'] = V
+        self.traj['Vs'] = Vs
+        self.traj['Ekin'] = Ekin
 
     def _surfacehop(self):
         # update previous population, energy matrix, and non-adiabatic coupling matrix
@@ -270,6 +322,18 @@ class AIMD:
         walltime=end-start
         walltime='%5d days %5d hours %5d minutes %5d seconds' % (int(walltime/86400),int((walltime%86400)/3600),int(((walltime%86400)%3600)/60),int(((walltime%86400)%3600)%60))
         return walltime
+
+    def _chkerror(self):
+        ## This function check the errors in energy, force, and NAC
+        ## This function stop MD if the errors exceed the threshold
+
+        err_e     = self.traj['err_e']              ## error of energy in adaptive sampling
+        err_g     = self.traj['err_g']              ## error of gradient in adaptive sampling
+        err_n     = self.traj['err_n']              ## error of nac in adaptive sampling
+
+        if err_e != None and err_g != None and err_n != None:
+            if err_e > self.maxerr_e or err_g > self.maxerr_g or err_n > self.maxerr_n:
+                self.stop = 1
 
     def	_chkpoint(self):
         ## This function print current information
@@ -360,8 +424,6 @@ class AIMD:
 -------------------------------------------------------
 
 """ % (iter,err_e,err_g,err_n)
-       	    if err_e > self.maxerr_e or err_g > self.maxerr_g or err_n > self.maxerr_n:
-                self.stop = 1
 
         energy_info='%8.2f%28.16f%28.16f%28.16f%s\n' % (iter*t,E[old_state-1],Ekin,E[old_state-1]+Ekin,pot)
         xyz_info='%d\n%s\n%s' % (natom,cmmt,Printcoord(np.concatenate((T,R),axis=1)))
@@ -457,7 +519,7 @@ class AIMD:
             if self.timing == 1: print('thermostat',time.time())
             self._surfacehop()   # update A,H,D,V,state
             if self.timing == 1: print('surfacehop',time.time())
-
+            self._chkerror()
             if   self.traj['iter'] <= self.direct:
                 self._chkpoint()
             else:

@@ -1,5 +1,6 @@
 import os
 from data_processing import TrainDataInfo
+from tools import Read_angle_index
 
 def read_control(keywords,values):
     ## This function read variables from &control
@@ -83,6 +84,10 @@ def read_molcas(keywords,values):
             keywords[key] = int(val[0])
         elif key == 'track_phase':
             keywords[key] = int(val[0])
+        elif key == 'basis':
+            keywords[key] = int(val[0])
+        elif key == 'use_hpc':
+            keywords[key] = int(val[0])
 
     return keywords
 
@@ -98,6 +103,8 @@ def read_bagel(keywords,values):
         elif key == 'bagel_nproc':
             keywords[key] = val[0]
         elif key == 'bagel_workdir':
+            keywords[key] = val[0]
+        elif key == 'bagel_archive':
             keywords[key] = val[0]
         elif key == 'mpi':
             keywords[key] = val[0]
@@ -133,6 +140,14 @@ def read_md(keywords,values):
         key=key.lower()
         if   key == 'initcond':
             keywords[key] = int(val[0])
+        elif key == 'excess':
+            keywords[key] = float(val[0])
+        elif key == 'graddesc':
+            keywords[key] = int(val[0])
+        elif key == 'reset':
+            keywords[key] = int(val[0])
+        elif key == 'resetstep':
+            keywords[key] = int(val[0])
         elif key == 'nesmb':
             keywords[key] = int(val[0])
        	elif key == 'method':
@@ -167,6 +182,8 @@ def read_md(keywords,values):
             keywords[key] = int(val[0])
         elif key == 'thermo':
             keywords[key] = int(val[0])
+        elif key == 'thermodelay':
+            keywords[key] = int(val[0])
         elif key == 'silent':
             keywords[key] = int(val[0])
         elif key == 'verbose':
@@ -180,6 +197,8 @@ def read_md(keywords,values):
         elif key == 'restart':
             keywords[key] = int(val[0])
         elif key == 'addstep':
+            keywords[key] = int(val[0])
+        elif key == 'history':
             keywords[key] = int(val[0])
         elif key == 'ref_e':
             keywords[key] = int(val[0])
@@ -253,6 +272,10 @@ def read_nn(keywords,values):
             keywords[key] = val[0].lower()
         elif key == 'nac_unit':
             keywords[key] = val[0].lower()
+        elif key == 'permute_map':
+            keywords[key] = str(val[0])
+        elif key == 'gpu':
+            keywords[key] = int(val[0])
 
     keywords['data'],keywords['postdata'],keywords['data_info']=TrainDataInfo(keywords)
 
@@ -300,6 +323,11 @@ def read_arch(keywords,values):
             keywords[key] = [float(x) for x in val]
         elif key in ['epoch_step_reduction']:
             keywords[key] = [int(x) for x in val]
+        elif key == 'angle_index':
+            keywords[key] = Read_angle_index(val,3)
+        elif key == 'dihyd_index':
+            keywords[key] = Read_angle_index(val,4)
+
 
     return keywords
 
@@ -348,6 +376,7 @@ def ReadInput(input):
     'molcas_calcdir' :'%s/tmp_MOLCAS' % (os.getcwd()),
     'molcas_workdir' : None,
     'track_phase'    : 0,
+    'basis'          : 2,
     'omp_num_threads':'1',
     'read_nac'       : 1,
     'use_hpc'        : 0,
@@ -364,6 +393,7 @@ def ReadInput(input):
     'bagel_nproc'    : 1,
     'bagel_project'  : None,
     'bagel_workdir'  :'%s/tmp_BAGEL' % (os.getcwd()),
+    'bagel_archive'  :'default',
     'mpi'            :'/work/lopez/mvapich2-2.3.4',
     'blas'           :'/work/lopez/BLAS',
     'lapack'         :'/work/lopez/BLAS',
@@ -383,36 +413,42 @@ def ReadInput(input):
     }
 
     variables_md={
-    'gl_seed'  : 1,     # Caution! This value will be updated by variables_control['gl_seed']. Not allow user to set.
-    'initcond' : 1,
-    'nesmb'    : 20,
-    'method'   :'wigner',
-    'format'   :'molden',
-    'temp'     : 300,
-    'step'     : 10,
-    'size'     : 40,
-    'ci'       : 2,
-    'root'     : 2,
-    'sfhp'     :'fssh',
-    'gap'      : 0.5,
-    'substep'  : 0,
-    'integrate': 0,
-    'deco'     : 0.1,
-    'adjust'   : 1,
-    'reflect'  : 1,
-    'maxh'     : 10,
-    'thermo'   : 1,
-    'silent'   : 1,
-    'verbose'  : 0,
-    'direct'   : 2000,
-    'buffer'   : 500,
-    'record'   : 1,
-    'restart'  : 0,
-    'addstep'  : 0,
-    'group'    : None,    # Caution! This value will be set when run multiple md. Not allow user to set.
-    'ref_e'    : 0,
-    'ref_g'    : 0,
-    'ref_n'    : 0, 
+    'gl_seed'     : 1,     # Caution! This value will be updated by variables_control['gl_seed']. Not allow user to set.
+    'initcond'    : 1,
+    'excess'      : 0,
+    'graddesc'    : 0,
+    'reset'       : 1,
+    'resetstep'   : 0,
+    'nesmb'       : 20,
+    'method'      :'wigner',
+    'format'      :'molden',
+    'temp'        : 300,
+    'step'        : 10,
+    'size'        : 40,
+    'ci'          : 2,
+    'root'        : 2,
+    'sfhp'        :'nosh',
+    'gap'         : 0.5,
+    'substep'     : 0,
+    'integrate'   : 0,
+    'deco'        : '0.1',
+    'adjust'      : 1,
+    'reflect'     : 1,
+    'maxh'        : 10,
+    'thermo'      : -1,
+    'thermodelay' : 200,
+    'silent'      : 1,
+    'verbose'     : 0,
+    'direct'      : 2000,
+    'buffer'      : 500,
+    'record'      : 1,
+    'restart'     : 0,
+    'addstep'     : 0,
+    'history'     : 100,
+    'group'       : None,    # Caution! This value will be set when run multiple md. Not allow user to set.
+    'ref_e'       : 0,
+    'ref_g'       : 0,
+    'ref_n'       : 0, 
    }
 
     variables_gp={
@@ -452,10 +488,14 @@ def ReadInput(input):
     'nac'      	 : None,  # Caution! This value will be updated later. Not allow user to set.
     'eg2'        : None,  # Caution! This value will be updated later. Not allow user to set.
     'nac2'       : None,  # Caution! This value will be updated later. Not allow user to set.
+    'permute_map':'No',
+    'gpu'        : 0,
     }
 
     variables_eg={
     'model_type'            :'mlp_eg',
+    'angle_index'           :[],
+    'dihyd_index'           :[],
     'depth'                 : 4,
     'nn_size'               : 100,
     'activ'                 :'leaky_softplus',
@@ -498,6 +538,8 @@ def ReadInput(input):
 
     variables_nac={
     'model_type'            :'mlp_nac2',
+    'angle_index'           :[],
+    'dihyd_index'           :[],
     'depth'                 : 4,
     'nn_size'               : 100,
     'activ'                 :'leaky_softplus',
@@ -683,19 +725,32 @@ def StartInfo(variables_all):
   Reflect velocity:           %-10s
   Maxhop:                     %-10s
   Thermostat:                 %-10s
-  Print level                 %-10s
+  Thermostat delay:           %-10s
+  Print level:                %-10s
   Direct output:              %-10s
   Buffer output:              %-10s
   Record MD history:          %-10s
   Restart function:           %-10s
   Additional steps:           %-10s
+  History:                    %-10s
 -------------------------------------------------------
-""" % (variables_md['initcond'], variables_md['nesmb'],    variables_md['method'],  variables_md['format'], \
-       variables_md['ci'],       variables_md['root'],     variables_md['temp'],    variables_md['step'],   \
-       variables_md['size'],     variables_md['sfhp'],     variables_md['substep'], variables_md['integrate'], \
-       variables_md['deco'],     variables_md['adjust'],   variables_md['reflect'], variables_md['maxh'],\
-       variables_md['thermo'],   variables_md['verbose'],  variables_md['direct'],  variables_md['buffer'],\
-       variables_md['record'],   variables_md['restart'],  variables_md['addstep'])
+
+  &md velocity control
+-------------------------------------------------------
+  Excess kinetic energy       %-10s
+  Gradient descent path       %-10s
+  Reset velocity:             %-10s
+  Reset step:                 %-10s
+-------------------------------------------------------
+
+""" % (variables_md['initcond'], variables_md['nesmb'],        variables_md['method'],  variables_md['format'], \
+       variables_md['ci'],       variables_md['root'],         variables_md['temp'],    variables_md['step'],   \
+       variables_md['size'],     variables_md['sfhp'],         variables_md['substep'], variables_md['integrate'], \
+       variables_md['deco'],     variables_md['adjust'],       variables_md['reflect'], variables_md['maxh'],\
+       variables_md['thermo'],   variables_md['thermodelay'],  variables_md['verbose'], variables_md['direct'],\
+       variables_md['buffer'],   variables_md['record'],       variables_md['restart'], variables_md['addstep'],\
+       variables_md['history'],\
+       variables_md['excess'],  variables_md['graddesc'],     variables_md['reset'],   variables_md['resetstep'])
 
     hybrid_info="""
   &hybrid namd
@@ -732,10 +787,13 @@ def StartInfo(variables_all):
   Shuffle data:               %-10s
   EG unit:                    %-10s
   NAC unit:                   %-10s
+  Data permutation            %-10s
 -------------------------------------------------------
 
   &hyperparameters            Energy+Gradient    Nonadiabatic couplings Energy+Gradient(2) Nonadiabatic couplings(2)
 -----------------------------------------------------------------------
+  Angle Features:             %-20s %-20s %-20s %-20s
+  Dihedral Features:          %-20s %-20s %-20s %-20s
   Activation:                 %-20s %-20s %-20s %-20s
   Activation alpha:           %-20s %-20s %-20s %-20s
   Layers:      	              %-20s %-20s %-20s %-20s
@@ -767,7 +825,9 @@ def StartInfo(variables_all):
 -----------------------------------------------------------------------
 """ % (variables_nn['data_info'],          variables_nn['train_data'],          variables_nn['pred_data'],           variables_nn['train_mode'],\
        variables_nn['silent'],             variables_nn['nn_eg_type'],          variables_nn['nn_nac_type'],         variables_nn['shuffle'],\
-       variables_nn['eg_unit'],            variables_nn['nac_unit'],\
+       variables_nn['eg_unit'],            variables_nn['nac_unit'],            variables_nn['permute_map'],\
+       len(variables_eg['angle_index']),   len(variables_nac['angle_index']),   len(variables_eg['angle_index']),    len(variables_nac2['angle_index']),\
+       len(variables_eg['dihyd_index']),   len(variables_nac['dihyd_index']),  	len(variables_eg['dihyd_index']),    len(variables_nac2['dihyd_index']),\
        variables_eg['activ'],              variables_nac['activ'],              variables_eg2['activ'],              variables_nac2['activ'],\
        variables_eg['activ_alpha'],        variables_nac['activ_alpha'],        variables_eg2['activ_alpha'],        variables_nac2['activ_alpha'],\
        variables_eg['depth'],              variables_nac['depth'],              variables_eg2['depth'],              variables_nac2['depth'],\
@@ -823,6 +883,7 @@ def StartInfo(variables_all):
   BAGEL_nproc:              %-10s
   BAGEL_project:            %-10s
   BAGEL_workdir:            %-10s
+  BAGEL_archive:            %-10s
   MPI:                      %-10s
   BLAS:                     %-10s
   LAPACK:                   %-10s
@@ -835,7 +896,8 @@ def StartInfo(variables_all):
   Read NAC:                 %-10s
 -------------------------------------------------------
 """ % (variables_bagel['bagel'],         variables_bagel['bagel_nproc'],     variables_bagel['bagel_project'],\
-       variables_bagel['bagel_workdir'], variables_bagel['mpi'],             variables_bagel['blas'],\
+       variables_bagel['bagel_workdir'], variables_bagel['bagel_archive'],\
+       variables_bagel['mpi'],           variables_bagel['blas'],\
        variables_bagel['lapack'],        variables_bagel['boost'],           variables_bagel['mkl'],\
        variables_bagel['arch'],          variables_bagel['omp_num_threads'], variables_bagel['ci'],\
        variables_bagel['keep_tmp'],      variables_bagel['read_nac'])

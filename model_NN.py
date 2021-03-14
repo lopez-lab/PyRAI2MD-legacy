@@ -3,6 +3,7 @@
 
 import time,datetime,json
 import numpy as np
+from tools import PermuteMap
 from pyNNsMD.nn_pes import NeuralNetPes
 from pyNNsMD.nn_pes_src.device import set_gpu
 
@@ -33,6 +34,9 @@ class DNN:
         hyp_nac                    = variables['nac'].copy()
         hyp_eg2                    = variables['eg2'].copy()
         hyp_nac2                   = variables['nac2'].copy()
+        seed                       = variables['ml_seed']
+        permute                    = variables['permute_map']
+        gpu                        = variables['gpu']
 
         ## setup l1 l2 dict
         for model_dict in [hyp_eg,hyp_nac,hyp_eg2,hyp_nac2]:
@@ -102,8 +106,8 @@ class DNN:
                                     'use_reg_weight'        : hyp_eg['use_reg_weight_dict'],
                                     'use_reg_bias'          : hyp_eg['use_reg_bias_dict'],
                                     'invd_index'            : True,
-                                    'angle_index'           : [],
-                                    'dihyd_index'           : [],
+                                    'angle_index'           : hyp_eg['angle_index'],
+                                    'dihyd_index'           : hyp_eg['dihyd_index'],
                                     },
        	       	      'training'   :{
                                     'auto_scaling'          : {
@@ -177,8 +181,8 @@ class DNN:
                                     'use_reg_weight'        : hyp_nac['use_reg_weight_dict'], 
                                     'use_reg_bias'          : hyp_nac['use_reg_bias_dict'],
                                     'invd_index'            : True,
-                                    'angle_index'           : [],
-                                    'dihyd_index'           : [],
+                                    'angle_index'           : hyp_nac['angle_index'],
+                                    'dihyd_index'           : hyp_nac['dihyd_index'],
                                     },
        	       	      'training'   :{
                                     'auto_scaling'          : {
@@ -251,8 +255,8 @@ class DNN:
                                     'use_reg_weight'        : hyp_eg2['use_reg_weight_dict'], 
                                     'use_reg_bias'          : hyp_eg2['use_reg_bias_dict'],
                                     'invd_index'            : True,
-                                    'angle_index'           : [],
-                                    'dihyd_index'           : [],
+                                    'angle_index'           : hyp_eg2['angle_index'],
+                                    'dihyd_index'           : hyp_eg2['dihyd_index'],
                                     },
        	       	      'training'   :{
                                     'auto_scaling'          : {
@@ -325,8 +329,8 @@ class DNN:
                                     'use_reg_weight'        : hyp_nac2['use_reg_weight_dict'], 
                                     'use_reg_bias'          : hyp_nac2['use_reg_bias_dict'],
                                     'invd_index'            : True,
-                                    'angle_index'           : [],
-                                    'dihyd_index'           : [],
+                                    'angle_index'           : hyp_nac2['angle_index'],
+                                    'dihyd_index'           : hyp_nac2['dihyd_index'],
                                     },
        	       	      'training'   :{
                                     'auto_scaling'          : {
@@ -434,9 +438,15 @@ class DNN:
         ## combine y_dict
         self.y_dict = {}
         if nn_eg_type > 0:
-            self.y_dict['energy_gradient'] = [data['energy']*self.H_to_eV,data['gradient']*self.H_Bohr_to_eV_A]
+            y_energy = data['energy']*self.H_to_eV
+            y_grad   = data['gradient']*self.H_Bohr_to_eV_A
+            self.y_dict['energy_gradient'] = [y_energy,y_grad]
         if nn_nac_type > 0:
-            self.y_dict['nac'] = data['nac']/self.Bohr_to_A
+            y_nac    = data['nac']/self.Bohr_to_A
+            self.y_dict['nac'] = y_nac
+
+        ## check permuation map
+        self.x,self.y_dict = PermuteMap(self.x,self.y_dict,permute,seed)
 
         ## combine hypers
         self.hyper = {}
@@ -449,8 +459,23 @@ class DNN:
        	elif nn_nac_type >  1:
             self.hyper['nac']=hyp_dict_nac=[hyp_dict_nac,hyp_dict_nac2]
 
+        ## setup GPU list
+        self.gpu_list={}
+        if   gpu == 1:
+            self.gpu_list['energy_gradient']=[0,0]
+            self.gpu_list['nac']=[0,0]
+       	elif gpu == 2:
+            self.gpu_list['energy_gradient']=[0,1]
+            self.gpu_list['nac']=[0,1]
+       	elif gpu == 3:
+            self.gpu_list['energy_gradient']=[0,1]
+            self.gpu_list['nac']=[2,2]
+       	elif gpu == 4:
+            self.gpu_list['energy_gradient']=[0,1]
+            self.gpu_list['nac']=[2,3]
+
         ## initialize model
-        if   modeldir == None:
+        if   modeldir == None or id not in [None,1]:
             self.model = NeuralNetPes(self.name)
         else:
             self.model = NeuralNetPes(modeldir)
@@ -498,9 +523,9 @@ class DNN:
         log.close()
 
         if self.train_mode == 'resample':
-            out_index,out_errr,out_fiterr,out_testerr=self.model.resample(self.x,self.y_dict,gpu_dist={},proc_async=self.ncpu>=4)
+            out_index,out_errr,out_fiterr,out_testerr=self.model.resample(self.x,self.y_dict,gpu_dist=self.gpu_list,proc_async=self.ncpu>=4)
         else:
-            ferr=self.model.fit(self.x,self.y_dict,gpu_dist={},proc_async=self.ncpu>=4,fitmode=self.train_mode,random_shuffle=self.shuffle)
+            ferr=self.model.fit(self.x,self.y_dict,gpu_dist=self.gpu_list,proc_async=self.ncpu>=4,fitmode=self.train_mode,random_shuffle=self.shuffle)
             print(ferr)
             #self.model.save()
             err_eg1=ferr['energy_gradient'][0]

@@ -10,6 +10,33 @@ class BAGEL:
     ## This function run BAGEL single point calculation
 
     def __init__(self,variables_all,id=None):
+        """
+    Name               Type     Descriptions
+    -----------------------------------------
+    variables_all      dict     input file keywords from entrance.py.
+    self.*:
+        natom          int      number of atoms.
+        ci             int      number of state, like ciroot in OpenMolcas.
+        previous_civec list     list of configuration interaction vectors, not used with BAGEL
+        previous_movec list     list of molecular orbital vectors, not used with BAGEL
+        keep_tmp       int      keep the BAGEL calculation folders (1) or not (0).
+        verbose        int      print level.
+        project        str      calculation name.
+        workdir        str      calculation folder.
+        bagel          str      BAGEL executable folder
+        nproc          int      number of CPUs for parallelization
+        mpi            str      path to mpi library
+        blas           str      path to blas library
+        lapack         str      path to lapack library
+        boost          str      path to boost library
+        mkl            str      path to mkl library
+        arch           str      CPU architecture
+        threads        int      number of threads for OMP parallelization.
+        read_nac       int      read NAC (1) or not(2).
+        use_hpc        int      use HPC (1) for calculation or not(0), like SLURM.
+        use_mpi        int      use MPI (1) for calculation or not(0).
+        """
+
         self.natom          = 0
         variables           = variables_all['bagel']
         self.keep_tmp       = variables['keep_tmp']
@@ -17,6 +44,7 @@ class BAGEL:
         self.ci             = variables['ci']
         self.project        = variables['bagel_project']
         self.workdir        = variables['bagel_workdir']
+        self.archive        = variables['bagel_archive']
         self.bagel          = variables['bagel']
         self.nproc          = variables['bagel_nproc']
         self.mpi            = variables['mpi']
@@ -29,6 +57,9 @@ class BAGEL:
         self.threads        = variables['omp_num_threads']
         self.use_mpi        = variables['use_mpi']
         self.use_hpc        = variables['use_hpc']
+
+        ## check calculation folder
+        ## add index when running in adaptive sampling
 
         if id != None:
             self.workdir    = '%s/tmp_BAGEL-%s' % (self.workdir,id)
@@ -50,7 +81,8 @@ class BAGEL:
         os.environ['PATH']                = '%s/bin:%s' % (self.mpi,os.environ['PATH'])
 
     def _xyz2json(self,natom,coord):
-        ## convert xyz from array to bagel format
+        ## convert xyz from array to bagel format (Bohr)
+
         a2b=1.88973   # angstrom to bohr
         jxyz=''
         comma=','
@@ -64,6 +96,9 @@ class BAGEL:
         return jxyz
 
     def _setup_hpc(self):
+        ## setup calculation using HPC
+        ## read slurm template from .slurm files
+
         if os.path.exists('%s.slurm' % (self.project)) == True:
             with open('%s.slurm' % (self.project)) as template:
                 submission=template.read()
@@ -110,9 +145,12 @@ cd $BAGEL_WORKDIR
             out.write(submission)
 
     def _setup_bagel(self,x):
-        ## Read input template from current directory
+        ## prepare .json .archive files
 
         self.natom=len(x)
+
+        ## Read input template from current directory
+
         with open('%s.bagel' % (self.project),'r') as template:
             input=template.read().splitlines()
 
@@ -132,21 +170,33 @@ cd $BAGEL_WORKDIR
 
         si_input = part1+coord+part2
 
+        ## check BAGEL workdir
         if os.path.exists(self.workdir) == False:
             os.makedirs(self.workdir)
 
+        ## save xyz file
         with open('%s/%s.json' % (self.workdir,self.project),'w') as out:
             out.write(si_input)
 
-        ## prepare .archive files
+        ## save .archive file
         if   os.path.exists('%s.archive' % (self.project)) == False:
             print('BAGEL: missing guess orbital .archive ')
             exit()
 
-        if os.path.exists('%s/%s.archive' % (self.workdir,self.project)) == False:
-            shutil.copy2('%s.archive' % (self.project),'%s/%s.archive' % (self.workdir,self.project))
+        if self.archive == 'default':
+            self.archive = self.project
+        
+        if os.path.exists('%s/%s.archive' % (self.workdir,self.archive)) == False:
+            shutil.copy2('%s.archive' % (self.project),'%s/%s.archive' % (self.workdir,self.archive))
+
+        ## clean calculation folder
+        os.system("rm %s/ENERGY*.out > /dev/null 2>&1" % (self.workdir))
+        os.system("rm %s/FORCE_*.out > /dev/null 2>&1" % (self.workdir))
+        os.system("rm %s/NACME_*.out > /dev/null 2>&1" % (self.workdir))
 
     def _run_bagel(self):
+        ## run BAGEL calculation
+
         maindir=os.getcwd()
         os.chdir(self.workdir)
         if self.use_hpc == 1:
@@ -159,14 +209,19 @@ cd $BAGEL_WORKDIR
         os.chdir(maindir)
 
     def _read_bagel(self):
+        ## read BAGEL logfile and pack data
 
         with open('%s/%s.log' % (self.workdir,self.project),'r') as out:
             log  = out.read().splitlines()
+
+        ## pack energy, only includes the requested states by self.ci
 
         energy   = []
        	if os.path.exists('%s/ENERGY.out' % (self.workdir)) ==	True:
             energy   = np.loadtxt('%s/ENERGY.out' % (self.workdir))[0:self.ci]
         energy   = np.array(energy)
+
+        ## pack force
 
         gradient = []
         for i in range(self.ci):
@@ -174,8 +229,14 @@ cd $BAGEL_WORKDIR
                 with open('%s/FORCE_%s.out' % (self.workdir,i)) as force:
                     g=force.read().splitlines()[1:self.natom+1]
                     g=S2F(g)
-                    gradient.append(g)
+            else:
+                g=[[0.,0.,0.] for x in range(self.natom)]
+
+            gradient.append(g)
         gradient = np.array(gradient)
+
+        ## pack NAC if requested
+        ## if NAC is not requested, always clean nac and reshape to [1,self.natom,3]
 
         if self.read_nac == 1:
             coupling = []
@@ -187,11 +248,14 @@ cd $BAGEL_WORKDIR
                     with open('%s/NACME_%s_%s.out' % (self.workdir,pa-1,pb-1)) as nacme:
                         cp=nacme.read().splitlines()[1:self.natom+1]
                         cp=S2F(cp)
-                        coupling.append(cp)
+                else:
+                    cp=[[0.,0.,0.] for x in range(self.natom)]
+                coupling.append(cp)
             nac  = np.array(coupling) 
         else:
             nac  = np.zeros([1,self.natom,3])
 
+        ## create zero np.array for civec and movec since they are not used
         civec    = np.zeros(0)
         movec    = np.zeros(0)
 
@@ -203,11 +267,22 @@ cd $BAGEL_WORKDIR
         return self
 
     def evaluate(self,x):
+        ## main function to run BAGEL calculation and communicate with other PyRAIMD modules
+
+        ## setup BAGEL calculation
         self._setup_bagel(x)
+
+        ## setup HPC settings
         if self.use_hpc == 1:
             self._setup_hpc()
+
+        ## run BAGEL calculation
         self._run_bagel()
+
+        ## read BAGEL output files
         energy,gradient,nac,civec,movec=self._read_bagel()
+
+        ## clean up
         if self.keep_tmp == 0:
             shutil.rmtree(self.workdir)
 

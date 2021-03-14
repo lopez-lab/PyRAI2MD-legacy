@@ -5,12 +5,38 @@
 import os,subprocess,shutil,h5py
 import numpy as np
 
-from tools import Printcoord,NACpairs,whatistime,S2F
+from tools import Printcoord,NACpairs,whatistime,S2F,Markatom
 
 class MOLCAS:
-    ## This function run Molcas single point calculation
+    ##This function run Molcas single point calculation
+    ##The class works with OpenMolcas 19.11
 
     def __init__(self,variables_all,id=None):
+        """
+    Name               Type     Descriptions
+    -----------------------------------------
+    variables_all      dict     input file keywords from entrance.py.
+    self.*:
+        natom          int      number of atoms.
+        ci             int      number of state, like ciroot in OpenMolcas.
+        previous_civec list     list of configuration interaction vectors, used to do phase correction based on ci overlap. The shape depends from Molcas rasscf.h5 file.
+        previous_movec list     list of molecular orbital vectors, used to do phase correction based on ci overlap. The shape depends from Molcas rasscf.h5 file.
+        keep_tmp       int      keep the Molcas calculation folders (1) or not (0).
+        verbose        int      print level.
+        track_phase    int      track NAC phase using CAS(2,2). Future will add correction based on NAC overlap.
+        basis          int      use customized basis set (1) or not(2).
+        project        str      calculation name.
+        workdir        str      Molcas workdir, molcas use this to write tmp files.
+        calcdir        str      calculation folder.
+        molcas         str      Molcas enviroment variable, executable folder.
+        molcas_nproc   int      Molcas_nproc enviroment variable,number of threads for OMP parallelization.
+        molcas_mem     int      Molcas_mem enviroment variable, calculation memory in MB.
+        molcas_print   int      Molcas_print enviroment variable, print level.
+        threads        int      number of threads for OMP parallelization.
+        read_nac       int      read NAC (1) or not(2).
+        use_hpc        int      use HPC (1) for calculation or not(0), like SLURM.
+        """
+
         self.natom          = 0
         variables           = variables_all['molcas']
         self.ci             = variables['ci']
@@ -19,6 +45,7 @@ class MOLCAS:
         self.keep_tmp       = variables['keep_tmp']
         self.verbose        = variables['verbose']
         self.track_phase    = variables['track_phase']
+        self.basis          = variables['basis']
 
         self.project        = variables['molcas_project']
         self.workdir        = variables['molcas_workdir']
@@ -31,10 +58,16 @@ class MOLCAS:
         self.read_nac       = variables['read_nac']
         self.use_hpc        = variables['use_hpc']
 
+        ## check calculation folder
+        ## add index when running in adaptive sampling
+
         if id != None:
             self.calcdir    = '%s/tmp_MOLCAS-%s' % (self.calcdir,id)
         else:
             self.calcdir    = '%s/tmp_MOLCAS' % (self.calcdir)
+
+        ## check Molcas workdir
+        ## use local scratch /srv/tmp or /tmp if set to 'AUTO'
 
         if   self.workdir == 'AUTO':
             if os.path.exists('/srv/tmp') == True:
@@ -53,17 +86,21 @@ class MOLCAS:
         os.environ['MOLCAS_WORKDIR']  = self.workdir
         os.environ['OMP_NUM_THREADS'] = self.threads
 
-        ## Generate gradient and nac part
+        ## add gradient and nac part in the input, this eunsure correct order of computing them, users don't need to add them in the input
+
         alaska = ''
         i=int((self.ci-1)*self.ci/2)
         pairs=NACpairs(self.ci)
         for j in range(i):
-            alaska+='&ALASKA\nNAC=%s %s\n' % (pairs[j+1][0],pairs[j+1][1])
+            if self.read_nac == 1:
+                alaska+='&ALASKA\nNAC=%s %s\n' % (pairs[j+1][0],pairs[j+1][1])
         for j in range(self.ci):
             alaska+='&ALASKA\nROOT=%s\n' % (j+1)
 #        alaska+='&CASPT2\nSHIFT\n0.1\nXMULTistate\nall\nmaxiter\n1000'
 
-        ## Read input template from current directory
+        ## read input template from current directory
+        ## make calculation folder and input file
+
         with open('%s.molcas' % (self.project),'r') as template:
             input=template.read()
         si_input ='%s\n%s' % (input,alaska)
@@ -78,6 +115,9 @@ class MOLCAS:
             out.write(si_input)
 
     def _setup_hpc():
+        ## setup calculation using HPC
+        ## read slurm template from .slurm files
+
         if os.path.exists('%s.slurm' % (self.project)) == True:
             with open('%s.slurm' % (self.project)) as template:
                 submission=template.read()
@@ -123,9 +163,25 @@ rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
         ## prepare .xyz .StrOrb files
 
         self.natom=len(x)
+
+        ## prepare a list for marking atoms with different basis sets if necessary
+
+        marks=[]
+        if os.path.exists('%s.basis' % (self.project)) == True:
+            with open('%s.basis' % (self.project)) as atommarks:
+                marks=atommarks.read().splitlines()
+                natom=int(marks[0])
+                marks=marks[2:2+natom]
+
+        if self.basis == 1 and len(marks)>0:            
+            x=Markatom(x,marks,'molcas')
+
+        ## save xyz and orbital files
+
         with open('%s/%s.xyz' % (self.calcdir,self.project),'w') as out:
             xyz='%s\n\n%s' % (self.natom,Printcoord(x))
             out.write(xyz)
+
         if   os.path.exists('%s.StrOrb' % (self.project)) == True and os.path.exists('%s/%s.RasOrb' % (self.calcdir,self.project)) == False:
             shutil.copy2('%s.StrOrb' % (self.project),'%s/%s.StrOrb' % (self.calcdir,self.project))
         elif os.path.exists('%s.StrOrb' % (self.project)) == True and os.path.exists('%s/%s.RasOrb' % (self.calcdir,self.project)) == True:
@@ -135,6 +191,8 @@ rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
             exit()
 
     def _run_molcas(self):
+        ## run molcas calculation
+
         maindir=os.getcwd()
         os.chdir(self.calcdir)
         if self.use_hpc == 1:
@@ -148,6 +206,8 @@ rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
         os.chdir(maindir)
 
     def _read_molcas(self):
+        ## read molcas logfile and pack data
+
         with open('%s/%s.log' % (self.calcdir,self.project),'r') as out:
             log  = out.read().splitlines()
         h5data   = h5py.File('%s/%s.rasscf.h5' % (self.calcdir,self.project),'r')
@@ -177,12 +237,22 @@ rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
             elif """Active orbitals""" in line and active == 0:
                 active=int(line.split()[-1])
 
+        ## pack data
+        ## energy only includes the requested states by self.ci
+        
         energy   = np.array(casscf)[0:self.ci]
         gradient = np.array(gradient)
         nac      = np.array(nac)
         norb     = int(len(movec)**0.5)
         movec    = movec[inactive*norb:(inactive+active)*norb]
         movec    = np.array(movec).reshape([active,norb])
+
+        ## clean movec and civec to reduce data size if phase correction is not requested
+        if self.track_phase == 0:
+            movec = np.zeros(0)
+            civec = np.zeros(0)
+
+        ## if NAC is not requested, always clean nac and reshape to [1,self.natom,3]
 
         if self.read_nac != 1:
             nac  = np.zeros([1,self.natom,3])
@@ -221,6 +291,8 @@ rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
         return mooverlap,mophase,mofactor
 
     def _ci_sign_correction(self,ref,ci,mofactor):
+        ## correct mo sign by overlap.
+
         cioverlap = []
         nstate    = len(ref)
         ciphase   = np.ones(nstate)
@@ -241,19 +313,33 @@ rm -r $MOLCAS_WORKDIR/$MOLCAS_PROJECT
         return cioverlap,ciphase,np.array(cifactor)
 
     def appendix(self,addons):
-        ## appendix function to add ci and mo vectors
+        ## appendix function to add ci and mo vectors of the previous step
+
         self.previous_civec = addons['pciv']
         self.previous_movec = addons['pmov']
         return self
 
     def evaluate(self,x):
+        ## main function to run Molcas calculation and communicate with other PyRAIMD modules
+
+        ## setup Molcas calculation
         self._setup_molcas(x)
+
+        ## setup HPC settings
         if self.use_hpc == 1:
             self._setup_hpc()
+
+        ## run Molcas calculation
         self._run_molcas()
+
+        ## read Molcas output files
         energy,gradient,nac,civec,movec=self._read_molcas()
+
+        ## phase correction
         if self.track_phase == 1:
             nac,civec,movec=self._phase_correction(x,nac,civec,movec)
+
+        ## clean up
         if self.keep_tmp == 0:
             shutil.rmtree(self.calcdir)
 

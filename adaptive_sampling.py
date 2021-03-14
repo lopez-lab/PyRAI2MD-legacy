@@ -11,6 +11,7 @@ from data_processing import AddTrainData,GetInvR
 from tools import Printcoord,Readinitcond
 from aligngeom import AlignGeom
 from dynamixsampling import Sampling
+from periodic_table import BondLib
 
 class AdaptiveSampling:
 
@@ -62,6 +63,7 @@ class AdaptiveSampling:
         self.ntraj        = nesmb                        # number of trajectories
         self.initcond     = [[] for x in range(nesmb)]   # initial conditions
         self.selec_geo    = [[] for x in range(nesmb)]   # selected geometries for QC calculation
+        self.discard_geo  = [[] for x in range(nesmb)]   # discarded geometries before QC calculation
         self.selec_e      = [[] for x in range(nesmb)]   # error of energy
         self.index_e      = [[] for x in range(nesmb)]   # index of selected geometry based on energy error
         self.selec_g      = [[] for x in range(nesmb)]   # error of gradient
@@ -134,6 +136,7 @@ class AdaptiveSampling:
     def _abinit_wrapper(self,selec_geom):
         ## run QC calculation
         geom_id,xyz=selec_geom
+        ## the geometry alignment is not necessary if NAC is not request. Maybe add a condition statement in the future
         geom_pool=self.variables[self.qm]['data'][2]
         choose=np.random.choice(np.arange(len(geom_pool)),np.amin([50,len(geom_pool)]),replace=False)
         geom_pool=np.array(geom_pool)[choose]
@@ -165,29 +168,32 @@ class AdaptiveSampling:
         minerr_n      = self.threshold['minnac']
 
         checkpoint={
-        'geom'     : [],
-        'energy'   : [],
-        'gradient' : [],
-        'nac'      : [],
-        'err_e'    : [],
-        'err_g'    : [],
-        'err_n'    : [],
-        'minerr_e' : minerr_e,
-        'minerr_g' : minerr_g,
-        'minerr_n' : minerr_n,
-        'max_e'    : 0,
-       	'max_g'	   : 0,
-       	'max_n'	   : 0,
-        'new_geom' : [],
-        'uncertain': [],
-        'pop'      : [],
+        'last'         : [],
+        'geom'         : [],
+        'energy'       : [],
+        'gradient'     : [],
+        'nac'          : [],
+        'err_e'        : [],
+        'err_g'        : [],
+        'err_n'        : [],
+        'minerr_e'     : minerr_e,
+        'minerr_g'     : minerr_g,
+        'minerr_n'     : minerr_n,
+        'max_e'        : 0,
+       	'max_g'	       : 0,
+       	'max_n'	       : 0,
+        'new_geom'     : [],
+        'discard_geom' : [],
+        'uncertain'    : [],
+        'pop'          : [],
         }
 
         for ntraj in range(self.ntraj):
-            geo,e,g,n,err_e,err_g,err_n,pop=np.array(md_traj[ntraj]).T
+            last,geo,e,g,n,err_e,err_g,err_n,pop=np.array(md_traj[ntraj]).T
 
             ## pack data into checkpoing dict
-            checkpoint['geom'].append(geo.tolist())    # all geometries
+            checkpoint['last'].append(last)            # the last MD step
+            checkpoint['geom'].append(geo.tolist())    # all recorded geometries
             checkpoint['energy'].append(e.tolist())    # all energies
             checkpoint['gradient'].append(g.tolist())  # all forces
             checkpoint['nac'].append(n.tolist())       # all NACs
@@ -240,17 +246,45 @@ class AdaptiveSampling:
                 index_tot=np.concatenate((index_tot,index_r)).astype(int)
                 index_tot=np.unique(index_tot)
 
-            self.selec_geo[ntraj] = np.array(geo)[index_tot].tolist()
-            self.selec_e[ntraj]   = selec_e
-            self.index_e[ntraj]   = index_e
-       	    self.selec_g[ntraj]   = selec_g
-       	    self.index_g[ntraj]   = index_g
-       	    self.selec_n[ntraj]   = selec_n
-            self.index_n[ntraj]   = index_n
+            keep_geo,discard_geo    = self._distance_filter(np.array(geo)[index_tot].tolist()) # filter out the unphyiscal geometries based on atom distances
+            self.selec_geo[ntraj]   = keep_geo
+            self.discard_geo[ntraj] = discard_geo
+            self.selec_e[ntraj]     = selec_e
+            self.index_e[ntraj]     = index_e
+       	    self.selec_g[ntraj]     = selec_g
+       	    self.index_g[ntraj]     = index_g
+       	    self.selec_n[ntraj]     = selec_n
+            self.index_n[ntraj]     = index_n
 
-        checkpoint['new_geom']    = self.selec_geo        # new geometries
+        checkpoint['new_geom']      = self.selec_geo        # new geometries
+        checkpoint['discard_geom']  = self.discard_geo      # discarded geometries
 
         return checkpoint
+
+    def _distance_filter(self,geom):
+        ## This function filter out unphysical geometries based on atom distances
+        keep=[]
+        discard=[]
+        if len(geom) > 0:
+            natom=len(geom[0])
+            for geo in geom:
+                unphysical=0
+                for i in range(natom):
+                    for j in range(i+1,natom): 
+                        atom1=geo[i][0]
+                        coord1=np.array(geo[i][1:4])
+       	       	       	atom2=geo[j][0]
+                        coord2=np.array(geo[j][1:4])
+                        distance=np.sum((coord1-coord2)**2)**0.5
+                        threshld=BondLib(atom1,atom2)
+                        if distance < threshld*0.7:
+                            unphysical=1
+                if unphysical == 1:
+                    discard.append(geo) 
+                else:
+                    keep.append(geo)
+
+        return keep,discard
 
     def _localmax(self,error,maxsample,neighbor):
         ## This function find local maximum of error as function of simulation step
@@ -333,41 +367,45 @@ class AdaptiveSampling:
         return None
 
     def _checkpoint(self,checkpoint_dict):
-        logpath     = os.getcwd()
-        geom        = checkpoint_dict['geom']
-        uncertain   = checkpoint_dict['uncertain']
-        new_geom    = checkpoint_dict['new_geom']
-        err_e       = checkpoint_dict['err_e']
-       	err_g  	    = checkpoint_dict['err_g']
-       	err_n  	    = checkpoint_dict['err_n']
-        max_e       = checkpoint_dict['max_e']
-        max_g       = checkpoint_dict['max_g']
-        max_n       = checkpoint_dict['max_n']
-        minerr_e    = checkpoint_dict['minerr_e']
-        minerr_g    = checkpoint_dict['minerr_g']
-        minerr_n    = checkpoint_dict['minerr_n']
-        pop         = checkpoint_dict['pop']
+        logpath      = os.getcwd()
+        last         = checkpoint_dict['last']
+        geom         = checkpoint_dict['geom']
+        uncertain    = checkpoint_dict['uncertain']
+        new_geom     = checkpoint_dict['new_geom']
+        discard_geom = checkpoint_dict['discard_geom']
+        err_e        = checkpoint_dict['err_e']
+       	err_g  	     = checkpoint_dict['err_g']
+       	err_n  	     = checkpoint_dict['err_n']
+        max_e        = checkpoint_dict['max_e']
+        max_g        = checkpoint_dict['max_g']
+        max_n        = checkpoint_dict['max_n']
+        minerr_e     = checkpoint_dict['minerr_e']
+        minerr_g     = checkpoint_dict['minerr_g']
+        minerr_n     = checkpoint_dict['minerr_n']
+        pop          = checkpoint_dict['pop']
 
-        converged   = 0
-        refinement  = 0
-        found       = 0
-        all_geom    = 0
+        converged    = 0
+        refinement   = 0
+        found        = 0
+       	discarded    = 0
+        all_geom     = 0
         traj_info='  &adaptive sampling progress\n'
         for i in range(self.ntraj):
             marker=''
             if uncertain[i] == 0:
                 converged+=1
                 marker='*'
-            traj_info+='  Traj %6s: %8s steps found %8s new geometries => MaxErr(Energy: %8.4f Gradient: %8.4f NAC: %8.4f) %s\n' % (i+1,len(geom[i]),uncertain[i],np.amax(err_e[i]),np.amax(err_g[i]),np.amax(err_n[i]),marker)
-            found += uncertain[i]
+            traj_info+='  Traj %6s: %8s steps found %8s new geometries discard %8s geometries => MaxErr(Energy: %8.4f Gradient: %8.4f NAC: %8.4f) %s\n' % (i+1,last[i][-1],uncertain[i],len(discard_geom[i]),np.amax(err_e[i]),np.amax(err_g[i]),np.amax(err_n[i]),marker)
+            found+=uncertain[i]
+            discarded+=len(discard_geom[i])
             all_geom+=len(new_geom[i])
 
-        refinement=all_geom-found
+        refinement=all_geom+discarded-found
 
         log_info="""
 %s
 
-  &adaptive sampling iter %s : converged %s of %s found %s new geometries (%s refinement)
+  &adaptive sampling iter %s : converged %s of %s found %s new geometries added %s refinement discarded %s
 
                  the largest error
 -------------------------------------------------------
@@ -375,7 +413,7 @@ class AdaptiveSampling:
   Gradient:                 %8.4f   %8.4f  %6s
   Non-adiabatic coupling:   %8.4f   %8.4f  %6s
 
-""" % (traj_info,self.iter, converged, self.ntraj,found,refinement,\
+""" % (traj_info,self.iter, converged, self.ntraj,found,refinement,discarded,\
        max_e, minerr_e, max_e<=minerr_e,\
        max_g, minerr_g, max_g<=minerr_g,\
        max_n, minerr_n, max_n<=minerr_n)

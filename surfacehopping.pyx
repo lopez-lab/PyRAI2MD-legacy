@@ -288,6 +288,9 @@ cpdef FSSH(dict traj):
             Vt=V                 # revert scaled velocity
             hoped=0
         else:
+            pairs_dict=NACpairs(ci)
+            pairs=pairs_dict[str([old_state,state])]
+            NAC=N[pairs-1] # pick up non-adiabatic coupling between state and new_state from the full array
             Vt,frustrated=Adjust(E[old_state-1],E[state-1],V,M,NAC,adjust,reflect)
             if frustrated == 0:  # hoped
                 hoped=1
@@ -329,14 +332,17 @@ cpdef GSH(dict traj):
     cdef float      Etotp, dE, Ex, z
     cdef float      pi_over_four_term, b_in_denom_term, Psum
     cdef float      a_squared, b_squared, F_a, F_b, F_1, F_2
-    cdef np.ndarray At,Ht,Dt,Vt,P,delE,NAC
+    cdef np.ndarray At,Ht,Dt,Vt,P,delE,NAC,N
     cdef np.ndarray f1_grad_manip_1,f1_grad_manip_2,f2_grad_manip_1,f2_grad_manip_2
-    cdef np.ndarray begin_term, F_ia_1, F_ia_2
+    cdef np.ndarray begin_term, F_ia_1, F_ia_2,Mexp
 
     if iter > 2:
         z = np.random.uniform(0, 1) # random number
         Psum = 0                   # total probability
         P = np.zeros(ci)           # state hopping probablity (zeros vector using ci dimensions)
+
+        # initialize a NAC matrix
+        N = np.zeros([ci,V.shape[0],V.shape[1]])
 
         for i in range(ci):
 
@@ -373,12 +379,15 @@ cpdef GSH(dict traj):
                 F_ia_2 = begin_term * (f2_grad_manip_1 - f2_grad_manip_2)
                 if test == 1: print('EQ 8 done: %s' % (F_ia_2))
 
+                # Expand the dimesion of mass matrix M from [natom,1] to [3,natom,1] then do a transpotation
+                # Reduce the dimesion of the transposed M from [1,natom,3] to [natom,3]
+                Mexp = np.array([M, M, M]).T[0]
+
                 # approximate nonadiabatic (vibronic) couplings, which are
                 # left out in BO approximation
-                M = np.array([M, M, M]).T # F has three dimensions, (x, y, z) --> need 3D array to represent force
-
                 NAC = (F_ia_2 - F_ia_1) / (M**0.5)
                 NAC = NAC / (np.sum(NAC**2)**0.5)
+                N[i]= NAC # add NAC to NAC matrix
                 if test == 1: print('Approximate NAC done: %s' % (NAC))
 
                 # EQ 4, EQ 5
@@ -433,6 +442,26 @@ cpdef GSH(dict traj):
                 hoped = 1   # has hop happened or not?
                 break
 
+    # if current state = old state, we know no surface hop has occurred
+    if state == old_state:
+        # Current velocity in this case will equal old velocity
+        Vt = V
+
+        # and mark this as no hop having occurred
+        hoped = 0
+    # Else, a hop has occurred
+    else:
+        # Velocity must be adjusted because hop has occurred
+        Vt, frustrated = Adjust(E[old_state - 1], E[state - 1], V, M, N[state-1], adjust = 1, reflect = 2)
+
+        # if frustrated is 0, we haven't had a frustrated hop
+        if frustrated == 0:
+            hoped = 1
+        # else, we have a frustrated hop, which implies we must revert current state index to old index
+        else:
+            state = old_state
+            hoped = 2
+
     # allocate zeros vector for population state density
     At = np.zeros([ci,ci])
 
@@ -444,26 +473,6 @@ cpdef GSH(dict traj):
 
     # Current non-adiabatic matrix
     Dt = np.zeros([ci, ci])
-
-    # if current state = old state, we know no surface hop has occurred
-    if state == old_state:
-        # Current velocity in this case will equal old velocity
-        Vt = V
-
-        # and mark this as no hop having occurred
-        hoped = 0
-    # Else, a hop has occurred
-    else:
-        # Velocity must be adjusted because hop has occurred
-        Vt, frustrated = Adjust(E[old_state - 1], E[state - 1], V, M, NAC, adjust = 1, reflect = 2)
-
-        # if frustrated is 0, we haven't had a frustrated hop
-        if frustrated == 0:
-            hoped = 1
-        # else, we have a frustrated hop, which implies we must revert current state index to old index
-        else:
-            state = old_state
-            hoped = 2
 
     if iter > 2 and verbose >= 2:
         # prints taken from reference code

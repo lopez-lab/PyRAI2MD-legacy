@@ -56,8 +56,9 @@ def logo(version):
 
 class PYRAIMD:
 
-    def __init__(self,input,version):
-
+    def __init__(self,input):
+        version='0.9'
+        if input == None: print(logo(version)), exit()
         input_dict=open(input,'r').read().split('&')
         self.variables_all=ReadInput(input_dict)
         input_info=StartInfo(self.variables_all)
@@ -174,17 +175,11 @@ class PYRAIMD:
 
 if __name__ == '__main__':
 
-    version = '0.8'
-    usage="""%s
-
-  Usage:
-      python3 PyRAIMD.py input
-
-""" % (logo(version))
+    if 'PYRAIMD' in os.environ.keys(): os.environ['PYTHONPATH'] = os.environ['PYRAIMD']
+    pmd=PYRAIMD
 
     if len(sys.argv) < 2:
-        print(usage)
+        print('\n  PyRAIMD: no input file...')
+        pmd(None)
     else:
-        os.environ['PYTHONPATH'] = os.environ['PYRAIMD']
-        pmd=PYRAIMD(sys.argv[1],version)
-        pmd.run()
+        pmd(sys.argv[1]).run()
