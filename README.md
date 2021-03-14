@@ -18,7 +18,7 @@ Python Rapid Artificial Intelligence Ab Initio Molecular Dynamics
                    Developer@Jingbai Li
                Northeastern University, USA
 
-                      version:   0.8
+                      version:   0.9
                       
     With contributions from(in alphabetic order):
     Andre Eberhard	           - Gaussian process regression
