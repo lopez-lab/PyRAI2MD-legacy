@@ -254,7 +254,7 @@ class AIMD:
             delay = self.traj['iter'] - self.traj['iter_x']
             if   self.traj['state'] == 1 and delay >= self.traj['thermodelay']:
                 V,Vs,Ekin = NoseHoover(self.traj)
-            elif self.traj['state'] != 1:
+            else:
                 V,Vs,Ekin = NVE(self.traj)
 
         self.traj['V'] = V
