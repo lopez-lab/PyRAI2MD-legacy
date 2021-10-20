@@ -39,4 +39,6 @@ Jingbai Li, Patrick Reiser, Benjamin R. Boswell, André Eberhard, Noah Z. Burns,
       
 -------------------------------------------------------
 
-Python Rapid Artificial Intelligence Ab Initio Molecular Dynamics (PyRAI<sup>2</sup>MD) is a package for nonadiabatic molecular dynamics simulation using potential energy surface predicted by machine-learning models. The primary aim of this project is to leverage the present nonadiabatic molecular dynamics techniques enabling nano-second scale simulations in practical molecular systems, which cost unaffordable computational resources using high-level quantum chemical methods like complete active space self-consistent field (CASSCF) with extended multistate second-order perturbative corrections (XMS-CASPT2). 
+Python Rapid Artificial Intelligence Ab Initio Molecular Dynamics (PyRAI<sup>2</sup>MD) is a package for nonadiabatic molecular dynamics simulation using potential energy surface predicted by machine-learning models. The primary aim of this project is to leverage the present nonadiabatic molecular dynamics techniques enabling nano-second scale simulations in practical molecular systems, which cost unaffordable computational resources using high-level quantum chemical methods like complete active space self-consistent field (CASSCF) with extended multistate second-order perturbative corrections (XMS-CASPT2).
+
+This is the legacy version. The latest version is 2.0 alpha.
